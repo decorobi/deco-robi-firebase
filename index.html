@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deco Robi – Produzione</title>
+    <style>
+      :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22c55e; --danger:#ef4444; }
+      *{ box-sizing:border-box; }
+      body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial; background:#0b1220; color:#e5e7eb; }
+      .container{ max-width:1200px; margin:0 auto; padding:16px; }
+      .row{ display:grid; grid-template-columns: 360px 1fr; gap:16px; }
+      .card{ background:#0f172a; border-radius:16px; padding:16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+      .btn{ padding:12px 16px; border-radius:12px; border:none; cursor:pointer; font-weight:600; box-shadow:0 6px 16px rgba(0,0,0,.35); }
+      .btn:active{ transform: translateY(1px); }
+      .btn-primary{ background:#22c55e; color:#001b0a; }
+      .btn-secondary{ background:#1f2937; color:#e5e7eb; }
+      .btn-danger{ background:#ef4444; color:white; }
+      .toolbar{ display:flex; gap:8px; flex-wrap:wrap; }
+      .kpi{ display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+      .kpi .tile{ background:#0b1326; padding:12px; border-radius:12px; text-align:center; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }
+      .orders{ display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:16px; }
+      .order-card h3{ margin:0 0 8px; font-size:18px; }
+      .muted{ color:#9aa3b2; font-size:12px; }
+      .fieldrow{ display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin:8px 0; font-size:13px; }
+      .timer{ font-variant-numeric: tabular-nums; font-weight:700; font-size:20px; }
+      input, select, textarea{ width:100%; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); background:#0b1326; color:#e5e7eb; }
+      label{ font-size:12px; color:#94a3b8; }
+      dialog{ background:#0f172a; color:#e5e7eb; border:none; border-radius:16px; padding:16px; width:min(520px, 92vw); }
+      .pill{ padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#1f2937; display:inline-block; }
+      .pill.done{ background:#22c55e33; color:#22c55e; }
+      .footer{ opacity:.7; margin-top:8px; font-size:12px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
