@@ -10,6 +10,7 @@ import {
   doc,
   setDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
   query,
   orderBy,
@@ -30,23 +31,21 @@ const formatTime = (sec: number) => {
   return `${h}:${m}:${s}`;
 };
 
-// Crea un ID documento sicuro per Firestore (evita "/" e "\")
+// ID documento sicuro (niente "/" o "\")
 const toDocId = (order: string | number, code: string) =>
   `${String(order)}__${String(code)}`
     .trim()
-    .replace(/[\/\\]/g, '_') // sostituisce "/" e "\" con "_"
+    .replace(/[\/\\]/g, '_')
     .replace(/\s+/g, ' ');
 
-// normalizza stringa intestazione (per confronti robusti)
 const normalize = (s: string) =>
   String(s)
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // rimuove accenti
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-// ritorna il valore di una colonna cercando tra alias (case/accents insensitive)
 const pick = (row: Record<string, any>, aliases: string[]) => {
   const nk = Object.keys(row).map((k) => [k, normalize(k)] as const);
   const want = aliases.map(normalize);
@@ -54,14 +53,22 @@ const pick = (row: Record<string, any>, aliases: string[]) => {
   return hit ? row[hit[0]] : undefined;
 };
 
+type TimerState = { running: boolean; startedAt: number | null; elapsed: number; paused?: boolean };
+
 export default function App() {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [dateFilter, setDateFilter] = useState<string>('');
   const [showAdmin, setShowAdmin] = useState(false);
-  const [timers, setTimers] = useState<
-    Record<string, { running: boolean; startedAt: number | null; elapsed: number }>
-  >({});
+  const [timers, setTimers] = useState<Record<string, TimerState>>({});
+
+  // STOP modal (bloccante)
+  const [stopOpen, setStopOpen] = useState(false);
+  const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
+  const [stopOperator, setStopOperator] = useState<string>('');
+  const [stopPieces, setStopPieces] = useState<number>(0);
+  const [stopStep, setStopStep] = useState<number>(1);
+  const [stopNotes, setStopNotes] = useState<string>('');
 
   // load data
   useEffect(() => {
@@ -88,11 +95,10 @@ export default function App() {
     };
   }, [orders]);
 
-  // IMPORT CSV (robusto + diagnostica)
+  // ===== Import CSV / Google Sheet =====
   const handleImportCSV = async (file: File) => {
     try {
       await ensureAnonAuth();
-
       const parsed = await new Promise<RowIn[]>((resolve, reject) => {
         Papa.parse<RowIn>(file, {
           header: true,
@@ -105,11 +111,6 @@ export default function App() {
       if (!parsed || parsed.length === 0) {
         throw new Error('Il file CSV sembra vuoto o senza intestazioni.');
       }
-
-      // diagnostica: mostra intestazioni e prime righe in console
-      const headers = Object.keys(parsed[0] || {});
-      console.log('[IMPORT] Headers trovati:', headers);
-      console.log('[IMPORT] Sample 2 righe:', parsed.slice(0, 2));
 
       const batch = parsed
         .map((r) => {
@@ -155,11 +156,6 @@ export default function App() {
         created_at: any;
       }>;
 
-      if (batch.length === 0) {
-        throw new Error('Nessuna riga valida trovata. Intestazioni viste: ' + headers.join(' | '));
-      }
-
-      // upsert su Firestore
       for (const row of batch) {
         const id = toDocId(row.order_number, row.product_code);
         await setDoc(doc(db, 'order_items', id), row, { merge: true });
@@ -176,7 +172,6 @@ export default function App() {
     }
   };
 
-  // IMPORT da Google Sheet
   const importFromSheet = async () => {
     const url = prompt('Link Google Sheet (condiviso “chiunque col link”):');
     if (!url) return;
@@ -194,7 +189,7 @@ export default function App() {
     }
   };
 
-  // ADMIN → aggiungi operatore
+  // ===== Admin operators =====
   const addOperator = async () => {
     const name = prompt('Nome operatore:');
     if (!name) return;
@@ -206,7 +201,20 @@ export default function App() {
     setOperators([...(operators), { id: ref.id, name, active: true }]);
   };
 
-  // Inserimento manuale ordine
+  const toggleOperator = async (op: Operator) => {
+    if (!op.id) return;
+    await updateDoc(doc(db, 'operators', op.id), { active: !op.active });
+    setOperators(operators.map((o) => (o.id === op.id ? { ...o, active: !o.active } : o)));
+  };
+
+  const removeOperator = async (op: Operator) => {
+    if (!op.id) return;
+    if (!confirm(`Eliminare operatore "${op.name}"?`)) return;
+    await deleteDoc(doc(db, 'operators', op.id));
+    setOperators(operators.filter((o) => o.id !== op.id));
+  };
+
+  // ===== Inserimento manuale =====
   const manualInsert = async () => {
     const order_number = prompt('Numero ordine:') || '';
     const customer = prompt('Cliente:') || '';
@@ -228,7 +236,7 @@ export default function App() {
     setOrders([{ id, ...row }, ...orders]);
   };
 
-  // Timer
+  // ===== Timer =====
   useEffect(() => {
     const id = setInterval(() => {
       setTimers((t) => {
@@ -246,57 +254,85 @@ export default function App() {
   }, []);
 
   const startTimer = (id: string) =>
-    setTimers((t) => ({ ...t, [id]: { running: true, startedAt: Date.now(), elapsed: t[id]?.elapsed || 0 } }));
+    setTimers((t) => ({
+      ...t,
+      [id]: { running: true, startedAt: Date.now(), elapsed: t[id]?.elapsed || 0, paused: false },
+    }));
 
   const pauseTimer = (id: string) =>
-    setTimers((t) => ({ ...t, [id]: { ...(t[id] || { running: false, startedAt: null, elapsed: 0 }), running: false } }));
+    setTimers((t) => ({
+      ...t,
+      [id]: { ...(t[id] || { running: false, startedAt: null, elapsed: 0 }), running: false, paused: true },
+    }));
 
-  const stopTimer = async (o: OrderItem) => {
+  const resumeTimer = (id: string) =>
+    setTimers((t) => ({
+      ...t,
+      [id]: { ...(t[id] || { elapsed: 0 }), running: true, startedAt: Date.now(), paused: false },
+    }));
+
+  // ===== Stop (modal con select bloccanti) =====
+  const openStopModal = (o: OrderItem) => {
+    setStopTarget(o);
+    setStopOperator('');
+    setStopPieces(0);
+    setStopStep(1);
+    setStopNotes('');
+    setStopOpen(true);
+  };
+
+  const confirmStop = async () => {
+    if (!stopTarget) return;
+    const o = stopTarget;
     const tm = timers[o.id!] || { elapsed: 0 };
-    const operator_name = prompt('Operatore (benny, fusia, andrea, ...):') || '';
-    const pieces = Number(prompt('Numero pezzi eseguiti ora:') || '0') || 0;
-    const step = Number(prompt(`Quale passaggio hai eseguito? (1..${o.steps_count})`) || '1') || 1;
-    const notes = prompt('Note opzionali:') || '';
+
+    if (!stopOperator) {
+      alert('Seleziona un operatore');
+      return;
+    }
+    if (!stopStep || stopStep < 1 || stopStep > 10) {
+      alert('Seleziona un passaggio valido (1..10)');
+      return;
+    }
+    if (!Number.isFinite(stopPieces) || stopPieces < 0) {
+      alert('Inserisci un numero pezzi valido');
+      return;
+    }
+
     const log: Partial<OrderLog> = {
       order_item_id: o.id!,
-      operator_name,
-      step_number: step,
-      pieces_done: pieces,
-      notes,
+      operator_name: stopOperator,
+      step_number: stopStep,
+      pieces_done: stopPieces,
+      notes: stopNotes,
       duration_seconds: tm.elapsed,
       created_at: new Date().toISOString(),
     };
     await addDoc(collection(db, 'order_logs'), log as any);
-    const newDone = (o.qty_done || 0) + pieces;
-    const status: OrderItem['status'] =
-      newDone >= (o.qty_requested || 0 || newDone) ? 'eseguito' : 'in_esecuzione';
-    await updateDoc(doc(db, 'order_items', o.id!), { qty_done: newDone, status });
-    setOrders(orders.map((x) => (x.id === o.id ? { ...x, qty_done: newDone, status } : x)));
-    setTimers((t) => ({ ...t, [o.id!]: { running: false, startedAt: null, elapsed: 0 } }));
-    if (pieces > 0) {
-      const next = prompt('Quale stato vuoi eseguire? (essiccazione / imballaggio / consegna)');
-      if (next) {
-        const st = next.toLowerCase().includes('imball')
-          ? 'in_imballaggio'
-          : next.toLowerCase().includes('conse')
-            ? 'pronti_consegna'
-            : 'in_essiccazione';
-        await updateDoc(doc(db, 'order_items', o.id!), { status: st });
-        if (st === 'in_imballaggio') {
-          const n = Number(prompt('Quanti pezzi hai imballato ora?') || '0') || 0;
-          const by = prompt('Tuo nome per attestazione:') || '';
-          await fetch('/.netlify/functions/send-email', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ order: o, pieces: n, operator: by }),
-          }).catch(() => {});
-          alert('Email richiesta per imballo inviata (se configurata)');
-        }
-      }
+
+    const newDone = (o.qty_done || 0) + stopPieces;
+    const requested = o.qty_requested || 0;
+    // Alert > 40% della quantità richiesta (sul cumulato)
+    if (requested && newDone > 0.4 * requested) {
+      alert(`Attenzione: superato il 40% della quantità richiesta (${newDone}/${requested}).`);
     }
+
+    // Stato: in_esecuzione se non completato, altrimenti eseguito
+    const newStatus: OrderItem['status'] = requested && newDone >= requested ? 'eseguito' : 'in_esecuzione';
+    await updateDoc(doc(db, 'order_items', o.id!), { qty_done: newDone, status: newStatus });
+
+    setOrders(orders.map((x) => (x.id === o.id ? { ...x, qty_done: newDone, status: newStatus } : x)));
+    setTimers((t) => ({ ...t, [o.id!]: { running: false, startedAt: null, elapsed: 0, paused: false } }));
+    setStopOpen(false);
   };
 
-  // Export Excel
+  const closeOrder = async (o: OrderItem) => {
+    // chiudi ordine manualmente → eseguito
+    await updateDoc(doc(db, 'order_items', o.id!), { status: 'eseguito' });
+    setOrders(orders.map((x) => (x.id === o.id ? { ...x, status: 'eseguito' } : x)));
+  };
+
+  // ===== Export Excel =====
   const exportExcel = () => {
     const rows = orders.map((o) => ({
       Cliente: o.customer,
@@ -314,18 +350,23 @@ export default function App() {
     XLSX.writeFile(wb, 'riepilogo_ordini.xlsx');
   };
 
-  const filtered = orders; // (filtro per data potrà essere aggiunto)
+  const filtered = orders; // (potrai filtrare per data in un secondo step)
+
+  const qtyWarnStyle = (o: OrderItem) => {
+    const req = o.qty_requested || 0;
+    const done = o.qty_done || 0;
+    if (req && done > 0.4 * req) {
+      return { background: 'rgba(255,210,0,0.2)', border: '1px solid #ffd200' };
+    }
+    return {};
+  };
 
   return (
     <div className="container">
       <div className="toolbar" style={{ marginBottom: 12 }}>
         <label>
           Ordini dal...{' '}
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-          />
+          <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
         </label>
 
         <input
@@ -335,7 +376,7 @@ export default function App() {
             const f = e.target.files?.[0];
             if (f) {
               await handleImportCSV(f);
-              e.currentTarget.value = ''; // permette di ricaricare lo stesso file
+              e.currentTarget.value = '';
             }
           }}
         />
@@ -391,9 +432,16 @@ export default function App() {
           <h2>Ordini</h2>
           <div className="orders">
             {filtered.map((o) => {
-              const tm = timers[o.id!] || { running: false, elapsed: 0 };
+              const tm = timers[o.id!] || { running: false, elapsed: 0, paused: false };
+              const canResume = !tm.running && tm.elapsed > 0 && tm.paused;
+
+              const cardStyle: React.CSSProperties =
+                o.status === 'eseguito'
+                  ? { border: '1px solid #4ade80', boxShadow: '0 0 0 2px rgba(74,222,128,0.2)' }
+                  : {};
+
               return (
-                <div key={o.id || o.order_number + o.product_code} className="card order-card">
+                <div key={o.id || o.order_number + o.product_code} className="card order-card" style={cardStyle}>
                   <h3>{o.customer}</h3>
                   <div className="muted">Ordine {o.order_number}</div>
                   <div className="fieldrow">
@@ -413,7 +461,7 @@ export default function App() {
                   <div className="fieldrow">
                     <div>
                       <label>Q.ta eseguita</label>
-                      <div className="pill">{o.qty_done ?? 0}</div>
+                      <div className="pill" style={qtyWarnStyle(o)}>{o.qty_done ?? 0}</div>
                     </div>
                     <div>
                       <label>Passaggi</label>
@@ -430,29 +478,35 @@ export default function App() {
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       marginTop: 8,
+                      gap: 8,
+                      flexWrap: 'wrap',
                     }}
                   >
                     <div className="timer">{formatTime(tm.elapsed)}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      {!tm.running && (
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => startTimer(o.id! || o.order_number)}
-                        >
+                      {!tm.running && !canResume && (
+                        <button className="btn btn-primary" onClick={() => startTimer(o.id! || o.order_number)}>
                           Start
                         </button>
                       )}
                       {tm.running && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => pauseTimer(o.id! || o.order_number)}
-                        >
+                        <button className="btn btn-secondary" onClick={() => pauseTimer(o.id! || o.order_number)}>
                           Pausa
                         </button>
                       )}
-                      <button className="btn btn-danger" onClick={() => stopTimer(o)}>
+                      {canResume && (
+                        <button className="btn btn-primary" onClick={() => resumeTimer(o.id! || o.order_number)}>
+                          Riprendi
+                        </button>
+                      )}
+                      <button className="btn btn-danger" onClick={() => openStopModal(o)}>
                         Stop
                       </button>
+                      {(o.qty_requested || 0) > 0 && (o.qty_done || 0) >= (o.qty_requested || 0) && (
+                        <button className="btn" style={{ background: '#4ade80' }} onClick={() => closeOrder(o)}>
+                          Chiudi ordine
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -465,20 +519,58 @@ export default function App() {
       {/* Admin Operatori */}
       <dialog open={showAdmin} onClose={() => setShowAdmin(false)}>
         <h3>Operatori</h3>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '8px 0', minWidth: 320 }}>
           {operators.map((op) => (
-            <span key={op.id} className={'pill ' + (op.active ? 'done' : '')}>
-              {op.name}
-            </span>
+            <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+              <span className={'pill ' + (op.active ? 'done' : '')}>{op.name}</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-secondary" onClick={() => toggleOperator(op)}>
+                  {op.active ? 'Disattiva' : 'Attiva'}
+                </button>
+                <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
+              </div>
+            </div>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={addOperator}>
-            Aggiungi operatore
-          </button>
-          <button className="btn btn-secondary" onClick={() => setShowAdmin(false)}>
-            Chiudi
-          </button>
+          <button className="btn btn-primary" onClick={addOperator}>Aggiungi operatore</button>
+          <button className="btn btn-secondary" onClick={() => setShowAdmin(false)}>Chiudi</button>
+        </div>
+      </dialog>
+
+      {/* STOP MODAL */}
+      <dialog open={stopOpen} onClose={() => setStopOpen(false)}>
+        <h3>Registra produzione</h3>
+        <div style={{ display: 'grid', gap: 8, minWidth: 320 }}>
+          <label>
+            Operatore
+            <select value={stopOperator} onChange={(e) => setStopOperator(e.target.value)}>
+              <option value="">-- seleziona --</option>
+              {operators.filter(o => o.active).map((o) => (
+                <option key={o.id} value={o.name}>{o.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Passaggio
+            <select value={stopStep} onChange={(e) => setStopStep(Number(e.target.value))}>
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Pezzi eseguiti
+            <input type="number" min={0} value={stopPieces} onChange={(e) => setStopPieces(Number(e.target.value))} />
+          </label>
+          <label>
+            Note
+            <input type="text" value={stopNotes} onChange={(e) => setStopNotes(e.target.value)} placeholder="opzionale" />
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button className="btn btn-primary" onClick={confirmStop}>Conferma</button>
+          <button className="btn btn-secondary" onClick={() => setStopOpen(false)}>Annulla</button>
         </div>
       </dialog>
     </div>
