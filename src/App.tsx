@@ -16,6 +16,8 @@ import {
   orderBy,
 } from 'firebase/firestore';
 
+/* -------------------- Utils -------------------- */
+
 type RowIn = Record<string, any>;
 
 const asNumber = (v: any) => {
@@ -52,7 +54,8 @@ const pick = (row: Record<string, any>, aliases: string[]) => {
   return hit ? row[hit[0]] : undefined;
 };
 
-/* ---------- Modal semplice (overlay bloccante) ---------- */
+/* -------------------- Modal -------------------- */
+
 function Modal(props: { open: boolean; onClose: () => void; children: React.ReactNode; title?: string }) {
   if (!props.open) return null;
   return (
@@ -78,7 +81,8 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
   );
 }
 
-/* ---------- Timer ---------- */
+/* -------------------- Component -------------------- */
+
 type TimerState = { running: boolean; startedAt: number | null; elapsed: number; paused?: boolean };
 
 export default function App() {
@@ -156,7 +160,7 @@ export default function App() {
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
       alert('Import completato: ' + batch.length + ' righe');
     } catch (e: any) {
-      console.error('Errore durante import CSV', e);
+      console.error('Errore import CSV', e);
       alert('Errore import: ' + (e?.message || String(e)));
     }
   };
@@ -310,64 +314,72 @@ export default function App() {
       <div className="toolbar" style={{ marginBottom: 12 }}>
         <label>Ordini dal... <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} /></label>
 
-        <input type="file" accept=".csv" onChange={async (e) => {
-          const f = e.target.files?.[0]; if (f) { await handleImportCSV(f); e.currentTarget.value = ''; }
-        }} />
+        <input
+          type="file"
+          accept=".csv"
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            if (f) { await handleImportCSV(f); e.currentTarget.value = ''; }
+          }}
+        />
 
         <button className="btn btn-secondary" onClick={importFromSheet}>IMPORT DOC (Google Sheet)</button>
         <button className="btn btn-secondary" onClick={() => setShowAdmin(true)}>ADMIN (Operatori)</button>
         <button className="btn btn-primary" onClick={manualInsert}>INSERISCI ORDINE</button>
       </div>
 
-      <div className="row">
-        {/* Colonna sinistra: Cruscotto + Completati */}
-        <div className="card">
-          <h2>CRUSCOTTO OPERATIVO</h2>
-          <div className="kpi">
-            <div className="tile"><div className="muted">Da iniziare</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.da_iniziare}</div></div>
-            <div className="tile"><div className="muted">In esecuzione</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.in_esecuzione}</div></div>
-            <div className="tile"><div className="muted">Eseguiti</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.eseguiti}</div></div>
-            <div className="tile"><div className="muted">Prodotti oggi</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.pezziOggi}</div></div>
+      {/* ==== LAYOUT DUE COLONNE: SINISTRA (CRUSCOTTO+COMPLETATI) / DESTRA (ORDINI) ==== */}
+      <div
+        className="row"
+        style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}
+      >
+        {/* Colonna SINISTRA: Cruscotto + Completati */}
+        <div style={{ display: 'grid', gap: 12 }}>
+          {/* --- Cruscotto --- */}
+          <div className="card">
+            <h2>CRUSCOTTO OPERATIVO</h2>
+            <div className="kpi">
+              <div className="tile"><div className="muted">Da iniziare</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.da_iniziare}</div></div>
+              <div className="tile"><div className="muted">In esecuzione</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.in_esecuzione}</div></div>
+              <div className="tile"><div className="muted">Eseguiti</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.eseguiti}</div></div>
+              <div className="tile"><div className="muted">Prodotti oggi</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.pezziOggi}</div></div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div className="muted" style={{ marginBottom: 6 }}>Tempo eseguito oggi</div>
+              <div className="timer">{formatTime(kpi.tempoOggi)}</div>
+            </div>
+            <div className="footer"><button className="btn btn-secondary" onClick={exportExcel}>SCARICO EXCEL</button></div>
           </div>
-          <div style={{ marginTop: 12 }}>
-            <div className="muted" style={{ marginBottom: 6 }}>Tempo eseguito oggi</div>
-            <div className="timer">{formatTime(kpi.tempoOggi)}</div>
-          </div>
-          <div className="footer"><button className="btn btn-secondary" onClick={exportExcel}>SCARICO EXCEL</button></div>
+
+          {/* --- Completati --- */}
+          {executed.length > 0 && (
+            <div className="card">
+              <h3>Completati (passano al reparto successivo)</h3>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {executed.map(o => (
+                  <div key={o.id} className="card" style={{ border: '1px solid #4ade80' }}>
+                    <strong>{o.customer}</strong> — Ordine {o.order_number} — <span className="pill">eseguito</span>
+                    <div className="muted">Codice: {o.product_code} • Eseguiti: {o.qty_done ?? 0} / {o.qty_requested ?? '-'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        {executed.length > 0 && (
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Completati (passano al reparto successivo)</h3>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {executed.map(o => (
-                <div key={o.id} className="card" style={{ border: '1px solid #4ade80' }}>
-                  <strong>{o.customer}</strong> — Ordine {o.order_number} — <span className="pill">eseguito</span>
-                  <div className="muted">Codice: {o.product_code} • Eseguiti: {o.qty_done ?? 0} / {o.qty_requested ?? '-'}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Colonna destra: Ordini attivi */}
+        {/* Colonna DESTRA: Ordini attivi */}
         <div className="card">
           <h2>Ordini</h2>
           <div className="orders">
             {active.map((o) => {
               const tm = timers[o.id!] || { running: false, elapsed: 0, paused: false };
               const canResume = !tm.running && tm.elapsed > 0 && tm.paused;
-              const cardStyle: React.CSSProperties =
-                o.status === 'eseguito'
-                  ? { border: '1px solid #4ade80', boxShadow: '0 0 0 2px rgba(74,222,128,0.2)' }
-                  : {};
-
               const requested = o.qty_requested || 0;
               const done = o.qty_done || 0;
               const canClose = requested > 0 && done >= requested && o.status !== 'eseguito';
 
               return (
-                <div key={o.id || o.order_number + o.product_code} className="card order-card" style={cardStyle}>
+                <div key={o.id || o.order_number + o.product_code} className="card order-card">
                   <h3>{o.customer}</h3>
                   <div className="muted">Ordine {o.order_number}</div>
                   <div className="fieldrow">
