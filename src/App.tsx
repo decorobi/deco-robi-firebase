@@ -25,14 +25,14 @@ const formatTime = (sec: number) => {
 const toDocId = (order: string | number, code: string) =>
   `${String(order)}__${String(code)}`
     .trim()
-    .replace(/[\/\\]/g, '_')   // sostituisce "/" e "\" con "_"
+    .replace(/[\/\\]/g, '_')
     .replace(/\s+/g, ' ')
 
 // normalizza stringa intestazione (per confronti robusti)
 const normalize = (s: string) =>
   String(s)
     .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // rimuove accenti
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 
@@ -68,9 +68,12 @@ export default function App() {
     return { da_iniziare: byStatus('da_iniziare'), in_esecuzione: byStatus('in_esecuzione'), eseguiti: byStatus('eseguito'), pezziOggi: piecesToday, tempoOggi: 0 }
   }, [orders])
 
-  // IMPORT CSV (robusto a delimitatori e intestazioni simili)
+  // IMPORT CSV (robusto + diagnostica)
   const handleImportCSV = async (file: File) => {
     try {
+      // assicurati di essere autenticato prima di scrivere su Firestore
+      await ensureAnonAuth();
+
       const parsed = await new Promise<RowIn[]>((resolve, reject) => {
         Papa.parse<RowIn>(file, {
           header: true,
@@ -84,11 +87,16 @@ export default function App() {
         throw new Error('Il file CSV sembra vuoto o senza intestazioni.')
       }
 
+      // diagnostica: mostra intestazioni e sample righe
+      const headers = Object.keys(parsed[0] || {})
+      console.log('[IMPORT] Headers trovati:', headers)
+      console.log('[IMPORT] Sample 2 righe:', parsed.slice(0, 2))
+
       const batch = parsed
         .map((r) => {
           const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine'])
           const customer = pick(r, ['cliente'])
-          const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto'])
+          const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod'])
           const mlVal = pick(r, ['ml'])
           const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta'])
           const qty_in_oven = pick(r, ['inforno', 'in forno'])
@@ -123,9 +131,7 @@ export default function App() {
         }>
 
       if (batch.length === 0) {
-        const sample = parsed[0] || {}
-        const headers = Object.keys(sample).join(', ')
-        throw new Error('Nessuna riga valida trovata. Controlla i nomi colonna. Intestazioni viste: ' + headers)
+        throw new Error('Nessuna riga valida trovata. Intestazioni viste: ' + headers.join(' | '))
       }
 
       for (const row of batch) {
@@ -208,110 +214,4 @@ export default function App() {
     await updateDoc(doc(db, 'order_items', o.id!), { qty_done: newDone, status })
     setOrders(orders.map(x => x.id === o.id ? { ...x, qty_done: newDone, status } : x))
     setTimers(t => ({ ...t, [o.id!]: { running: false, startedAt: null, elapsed: 0 } }))
-    if (pieces > 0) {
-      const next = prompt('Quale stato vuoi eseguire? (essiccazione / imballaggio / consegna)')
-      if (next) {
-        const st = next.toLowerCase().includes('imball') ? 'in_imballaggio' : next.toLowerCase().includes('conse') ? 'pronti_consegna' : 'in_essiccazione'
-        await updateDoc(doc(db, 'order_items', o.id!), { status: st })
-        if (st === 'in_imballaggio') {
-          const n = Number(prompt('Quanti pezzi hai imballato ora?') || '0') || 0
-          const by = prompt('Tuo nome per attestazione:') || ''
-          await fetch('/.netlify/functions/send-email', {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ order: o, pieces: n, operator: by })
-          }).catch(() => { })
-          alert('Email richiesta per imballo inviata (se configurata)')
-        }
-      }
-    }
-  }
-
-  // Export Excel
-  const exportExcel = () => {
-    const rows = orders.map(o => ({
-      'Cliente': o.customer, 'Numero Ordine': o.order_number, 'Codice Prodotto': o.product_code,
-      'Q.ta Richiesta': o.qty_requested || '', 'Q.ta In Forno': o.qty_in_oven || '',
-      'Q.ta Eseguita': o.qty_done || '', 'Passaggi': o.steps_count, 'Stato': o.status
-    }))
-    const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Riepilogo'); XLSX.writeFile(wb, 'riepilogo_ordini.xlsx')
-  }
-
-  const filtered = orders // (filtro per data potrà essere aggiunto)
-
-  return (
-    <div className="container">
-      <div className="toolbar" style={{ marginBottom: 12 }}>
-        <label>Ordini dal... <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label>
-        <input type="file" accept=".csv" onChange={e => e.target.files && handleImportCSV(e.target.files[0])} />
-        <button className="btn btn-secondary" onClick={importFromSheet}>IMPORT DOC (Google Sheet)</button>
-        <button className="btn btn-secondary" onClick={() => setShowAdmin(true)}>ADMIN (Operatori)</button>
-        <button className="btn btn-primary" onClick={manualInsert}>INSERISCI ORDINE</button>
-      </div>
-
-      <div className="row">
-        {/* Sinistra - Cruscotto */}
-        <div className="card">
-          <h2>CRUSCOTTO OPERATIVO</h2>
-          <div className="kpi">
-            <div className="tile"><div className="muted">Da iniziare</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.da_iniziare}</div></div>
-            <div className="tile"><div className="muted">In esecuzione</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.in_esecuzione}</div></div>
-            <div className="tile"><div className="muted">Eseguiti</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.eseguiti}</div></div>
-            <div className="tile"><div className="muted">Prodotti oggi</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.pezziOggi}</div></div>
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <div className="muted" style={{ marginBottom: 6 }}>Tempo eseguito oggi</div>
-            <div className="timer">{formatTime(kpi.tempoOggi)}</div>
-          </div>
-          <div className="footer"><button className="btn btn-secondary" onClick={exportExcel}>SCARICO EXCEL</button></div>
-        </div>
-
-        {/* Destra - Ordini */}
-        <div className="card">
-          <h2>Ordini</h2>
-          <div className="orders">
-            {filtered.map(o => {
-              const tm = timers[o.id!] || { running: false, elapsed: 0 }
-              return (
-                <div key={o.id || o.order_number + o.product_code} className="card order-card">
-                  <h3>{o.customer}</h3>
-                  <div className="muted">Ordine {o.order_number}</div>
-                  <div className="fieldrow">
-                    <div><label>Codice prodotto</label><div>{o.product_code}</div></div>
-                    <div><label>Q.ta richiesta</label><div>{o.qty_requested ?? '-'}</div></div>
-                    <div><label>Q.ta in forno</label><div>{o.qty_in_oven ?? '-'}</div></div>
-                  </div>
-                  <div className="fieldrow">
-                    <div><label>Q.ta eseguita</label><div className="pill">{o.qty_done ?? 0}</div></div>
-                    <div><label>Passaggi</label><div>{o.steps_count}</div></div>
-                    <div><label>Stato</label><div className="pill">{o.status}</div></div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                    <div className="timer">{formatTime(tm.elapsed)}</div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {!tm.running && <button className="btn btn-primary" onClick={() => startTimer(o.id! || o.order_number)}>Start</button>}
-                      {tm.running && <button className="btn btn-secondary" onClick={() => pauseTimer(o.id! || o.order_number)}>Pausa</button>}
-                      <button className="btn btn-danger" onClick={() => stopTimer(o)}>Stop</button>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Admin Operatori */}
-      <dialog open={showAdmin} onClose={() => setShowAdmin(false)}>
-        <h3>Operatori</h3>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
-          {operators.map(op => (<span key={op.id} className={"pill " + (op.active ? 'done' : '')}>{op.name}</span>))}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={addOperator}>Aggiungi operatore</button>
-          <button className="btn btn-secondary" onClick={() => setShowAdmin(false)}>Chiudi</button>
-        </div>
-      </dialog>
-    </div>
-  )
-}
+    if (pieces > 0
