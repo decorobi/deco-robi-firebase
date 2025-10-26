@@ -81,7 +81,7 @@ function computeFullyDone(
   if (!stepsCount || stepsCount <= 0) return 0;
   const vals: number[] = [];
   for (let i = 1; i <= stepsCount; i++) {
-    const v = stepsProgress?.[i] ?? 0;
+    const v = (stepsProgress as any)?.[i] ?? 0;
     vals.push(Number(v) || 0);
   }
   if (vals.length === 0) return 0;
