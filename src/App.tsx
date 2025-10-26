@@ -54,6 +54,37 @@ const pick = (row: Record<string, any>, aliases: string[]) => {
   return hit ? row[hit[0]] : undefined;
 };
 
+/** Calcola qty_done come "pezzi realmente finiti", cioè il minimo tra i passaggi */
+function computeFullyDone(
+  stepsCount: number,
+  stepsProgress: Record<string | number, number> | undefined,
+  defaultZero = 0,
+): number {
+  if (!stepsCount || stepsCount <= 0) return 0;
+  const vals: number[] = [];
+  for (let i = 1; i <= stepsCount; i++) {
+    const v = stepsProgress?.[i] ?? 0;
+    vals.push(Number(v) || 0);
+  }
+  if (vals.length === 0) return 0;
+  return Math.max(defaultZero, Math.min(...vals));
+}
+
+/** True se ogni passaggio ha raggiunto almeno qty_requested */
+function isOrderCompletedBySteps(
+  stepsCount: number,
+  stepsProgress: Record<string | number, number> | undefined,
+  qtyRequested: number | null | undefined,
+): boolean {
+  const req = Number(qtyRequested) || 0;
+  if (!req || !stepsCount) return false;
+  for (let i = 1; i <= stepsCount; i++) {
+    const done = Number(stepsProgress?.[i] ?? 0);
+    if (done < req) return false;
+  }
+  return true;
+}
+
 /* -------------------- Modal -------------------- */
 
 function Modal(props: { open: boolean; onClose: () => void; children: React.ReactNode; title?: string }) {
@@ -145,6 +176,7 @@ export default function App() {
             qty_in_oven: asNumber(qty_in_oven ?? null),
             qty_done: 0,
             steps_count: Number(asNumber(steps ?? 0)) || 0,
+            steps_progress: {}, // inizializzato vuoto
             status: 'da_iniziare' as const,
             created_at: serverTimestamp(),
           };
@@ -208,7 +240,7 @@ export default function App() {
     const product_code = prompt('Codice prodotto:') || '';
     const steps_count = Number(prompt('Numero passaggi (es. 3):') || '0') || 0;
     const id = toDocId(order_number, product_code);
-    const row: OrderItem = { order_number, customer, product_code, steps_count, status: 'da_iniziare' };
+    const row: OrderItem = { order_number, customer, product_code, steps_count, status: 'da_iniziare', steps_progress: {} };
     await setDoc(doc(db, 'order_items', id), { ...row, created_at: serverTimestamp() }, { merge: true });
     setOrders([{ id, ...row }, ...orders]);
   };
@@ -246,6 +278,7 @@ export default function App() {
     setStopOpen(true);
   };
 
+  /** Conferma STOP: aggiorna order_logs e steps_progress; ricalcola qty_done e stato */
   const confirmStop = async () => {
     if (!stopTarget) return;
     const o = stopTarget;
@@ -255,20 +288,37 @@ export default function App() {
     if (!stopStep || stopStep < 1 || stopStep > 10) { alert('Seleziona un passaggio valido (1..10)'); return; }
     if (!Number.isFinite(stopPieces) || stopPieces < 0) { alert('Inserisci un numero pezzi valido'); return; }
 
+    // 1) Log
     const log: Partial<OrderLog> = {
       order_item_id: o.id!, operator_name: stopOperator, step_number: stopStep,
       pieces_done: stopPieces, notes: stopNotes, duration_seconds: tm.elapsed, created_at: new Date().toISOString()
     };
     await addDoc(collection(db, 'order_logs'), log as any);
 
-    const newDone = (o.qty_done || 0) + stopPieces;
-    const requested = o.qty_requested || 0;
+    // 2) Aggiorna avanzamento per passaggio
+    const prevProg = (o.steps_progress || {}) as Record<string | number, number>;
+    const newProg = { ...prevProg };
+    const curr = Number(newProg[stopStep] || 0);
+    newProg[stopStep] = curr + stopPieces;
 
-    // Se ho raggiunto/superato la richiesta, passo direttamente a "eseguito"
-    const newStatus: OrderItem['status'] = requested && newDone >= requested ? 'eseguito' : 'in_esecuzione';
-    await updateDoc(doc(db, 'order_items', o.id!), { qty_done: newDone, status: newStatus });
+    // 3) Ricalcola qty_done come "min dei passaggi"
+    const requested = Number(o.qty_requested || 0);
+    const stepsCount = Number(o.steps_count || 0);
+    const fullyDone = computeFullyDone(stepsCount, newProg, 0);
 
-    setOrders(orders.map((x) => (x.id === o.id ? { ...x, qty_done: newDone, status: newStatus } : x)));
+    // 4) Stato: completato solo se TUTTI i passaggi >= richiesto
+    const completed = isOrderCompletedBySteps(stepsCount, newProg, requested);
+    const nextStatus: OrderItem['status'] = completed ? 'eseguito' : 'in_esecuzione';
+
+    await updateDoc(doc(db, 'order_items', o.id!), {
+      steps_progress: newProg,
+      qty_done: fullyDone,
+      status: nextStatus
+    });
+
+    setOrders(orders.map((x) =>
+      x.id === o.id ? { ...x, steps_progress: newProg, qty_done: fullyDone, status: nextStatus } : x
+    ));
     setTimers((t) => ({ ...t, [o.id!]: { running: false, startedAt: null, elapsed: 0, paused: false } }));
     setStopOpen(false);
   };
@@ -286,7 +336,7 @@ export default function App() {
       'Codice Prodotto': o.product_code,
       'Q.ta Richiesta': o.qty_requested || '',
       'Q.ta In Forno': o.qty_in_oven || '',
-      'Q.ta Eseguita': o.qty_done || '',
+      'Q.ta Eseguita (tutti passaggi)': o.qty_done || 0,
       Passaggi: o.steps_count,
       Stato: o.status,
     }));
@@ -328,14 +378,14 @@ export default function App() {
         <button className="btn btn-primary" onClick={manualInsert}>INSERISCI ORDINE</button>
       </div>
 
-      {/* ==== LAYOUT DUE COLONNE: SINISTRA (CRUSCOTTO+COMPLETATI) / DESTRA (ORDINI) ==== */}
+      {/* ==== LAYOUT: SINISTRA (CRUSCOTTO+COMPLETATI) / DESTRA (ORDINI) ==== */}
       <div
         className="row"
         style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}
       >
-        {/* Colonna SINISTRA: Cruscotto + Completati */}
+        {/* Colonna SINISTRA */}
         <div style={{ display: 'grid', gap: 12 }}>
-          {/* --- Cruscotto --- */}
+          {/* Cruscotto */}
           <div className="card">
             <h2>CRUSCOTTO OPERATIVO</h2>
             <div className="kpi">
@@ -351,7 +401,7 @@ export default function App() {
             <div className="footer"><button className="btn btn-secondary" onClick={exportExcel}>SCARICO EXCEL</button></div>
           </div>
 
-          {/* --- Completati --- */}
+          {/* Completati */}
           {executed.length > 0 && (
             <div className="card">
               <h3>Completati (passano al reparto successivo)</h3>
@@ -359,7 +409,9 @@ export default function App() {
                 {executed.map(o => (
                   <div key={o.id} className="card" style={{ border: '1px solid #4ade80' }}>
                     <strong>{o.customer}</strong> — Ordine {o.order_number} — <span className="pill">eseguito</span>
-                    <div className="muted">Codice: {o.product_code} • Eseguiti: {o.qty_done ?? 0} / {o.qty_requested ?? '-'}</div>
+                    <div className="muted">
+                      Codice: {o.product_code} • Eseguiti (tutti passaggi): {o.qty_done ?? 0} / {o.qty_requested ?? '-'}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -376,22 +428,43 @@ export default function App() {
               const canResume = !tm.running && tm.elapsed > 0 && tm.paused;
               const requested = o.qty_requested || 0;
               const done = o.qty_done || 0;
-              const canClose = requested > 0 && done >= requested && o.status !== 'eseguito';
+              const canClose = requested > 0 && isOrderCompletedBySteps(o.steps_count, o.steps_progress, requested) && o.status !== 'eseguito';
 
               return (
                 <div key={o.id || o.order_number + o.product_code} className="card order-card">
                   <h3>{o.customer}</h3>
                   <div className="muted">Ordine {o.order_number}</div>
+
                   <div className="fieldrow">
                     <div><label>Codice prodotto</label><div>{o.product_code}</div></div>
                     <div><label>Q.ta richiesta</label><div>{requested || '-'}</div></div>
                     <div><label>Q.ta in forno</label><div>{o.qty_in_oven ?? '-'}</div></div>
                   </div>
+
                   <div className="fieldrow">
-                    <div><label>Q.ta eseguita</label><div className="pill" style={qtyWarnStyle(o)}>{done}</div></div>
+                    <div><label>Q.ta eseguita (tutti passaggi)</label><div className="pill" style={qtyWarnStyle(o)}>{done}</div></div>
                     <div><label>Passaggi</label><div>{o.steps_count}</div></div>
                     <div><label>Stato</label><div className="pill">{o.status}</div></div>
                   </div>
+
+                  {/* Avanzamento per passaggio */}
+                  {o.steps_count > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <label className="muted" style={{ display: 'block', marginBottom: 4 }}>Avanzamento per passaggio</label>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {Array.from({ length: o.steps_count }, (_, i) => {
+                          const n = i + 1;
+                          const prog = Number(o.steps_progress?.[n] ?? 0);
+                          return (
+                            <div key={n} className="pill">
+                              P{n}: {prog} / {requested || '-'}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
                     <div className="timer">{formatTime(tm.elapsed)}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
