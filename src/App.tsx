@@ -1,22 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Papa, { ParseResult } from 'papaparse'
 import * as XLSX from 'xlsx'
-import { Operator, OrderItem, OrderLog } from './types'
+import type { Operator, OrderItem, OrderLog } from './types'
 import { db, ensureAnonAuth } from './lib/firebaseClient'
 import {
   collection, addDoc, getDocs, doc, setDoc, updateDoc, serverTimestamp, query, orderBy
 } from 'firebase/firestore'
 
-type RowIn = {
-  "numero ordine": string | number
-  "descrizione"?: string
-  "codice prodotto": string
-  "ml"?: string | number
-  "Quantità inserita"?: string | number
-  "inforno"?: string | number
-  "Cliente": string
-  "Passaggi": string | number
-}
+type RowIn = Record<string, any>
 
 const asNumber = (v: any) => {
   if (v === null || v === undefined || v === '') return null
@@ -28,6 +19,29 @@ const formatTime = (sec: number) => {
   const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0')
   const s = Math.floor(sec % 60).toString().padStart(2, '0')
   return `${h}:${m}:${s}`
+}
+
+// crea un ID documento sicuro per Firestore (evita "/" e "\")
+const toDocId = (order: string | number, code: string) =>
+  `${String(order)}__${String(code)}`
+    .trim()
+    .replace(/[\/\\]/g, '_')   // sostituisce "/" e "\" con "_"
+    .replace(/\s+/g, ' ')
+
+// normalizza stringa intestazione (per confronti robusti)
+const normalize = (s: string) =>
+  String(s)
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // rimuove accenti
+    .replace(/\s+/g, ' ')
+    .trim()
+
+// ritorna il valore di una colonna cercando tra alias (case/accents insensitive)
+const pick = (row: Record<string, any>, aliases: string[]) => {
+  const nk = Object.keys(row).map(k => [k, normalize(k)] as const)
+  const want = aliases.map(normalize)
+  const hit = nk.find(([_, n]) => want.includes(n))
+  return hit ? row[hit[0]] : undefined
 }
 
 export default function App() {
@@ -54,40 +68,78 @@ export default function App() {
     return { da_iniziare: byStatus('da_iniziare'), in_esecuzione: byStatus('in_esecuzione'), eseguiti: byStatus('eseguito'), pezziOggi: piecesToday, tempoOggi: 0 }
   }, [orders])
 
-  // IMPORT CSV
+  // IMPORT CSV (robusto a delimitatori e intestazioni simili)
   const handleImportCSV = async (file: File) => {
-    const parsed = await new Promise<RowIn[]>((resolve, reject) => {
-      Papa.parse<RowIn>(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (res: ParseResult<RowIn>) => resolve(res.data as RowIn[]),
-        error: reject,
+    try {
+      const parsed = await new Promise<RowIn[]>((resolve, reject) => {
+        Papa.parse<RowIn>(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (res: ParseResult<RowIn>) => resolve(res.data as RowIn[]),
+          error: reject,
+        })
       })
-    });
 
-    const batch = parsed
-      .filter(r => r['numero ordine'])
-      .map(r => ({
-        order_number: String(r['numero ordine']),
-        customer: r['Cliente'] || '',
-        product_code: r['codice prodotto'] || '',
-        ml: asNumber(r['ml'] ?? null),
-        qty_requested: asNumber(r['Quantità inserita'] ?? null),
-        qty_in_oven: asNumber(r['inforno'] ?? null),
-        qty_done: 0,
-        steps_count: Number(asNumber(r['Passaggi'] ?? 0)) || 0,
-        status: 'da_iniziare',
-        created_at: serverTimestamp(),
-      }))
+      if (!parsed || parsed.length === 0) {
+        throw new Error('Il file CSV sembra vuoto o senza intestazioni.')
+      }
 
-    for (const row of batch) {
-      const id = `${row.order_number}__${row.product_code}`
-      await setDoc(doc(db, 'order_items', id), row, { merge: true })
+      const batch = parsed
+        .map((r) => {
+          const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine'])
+          const customer = pick(r, ['cliente'])
+          const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto'])
+          const mlVal = pick(r, ['ml'])
+          const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta'])
+          const qty_in_oven = pick(r, ['inforno', 'in forno'])
+          const steps = pick(r, ['passaggi', 'n passaggi', 'passi'])
+
+          if (!order_number || !product_code) return null
+
+          return {
+            order_number: String(order_number),
+            customer: customer ? String(customer) : '',
+            product_code: String(product_code),
+            ml: asNumber(mlVal ?? null),
+            qty_requested: asNumber(qty_requested ?? null),
+            qty_in_oven: asNumber(qty_in_oven ?? null),
+            qty_done: 0,
+            steps_count: Number(asNumber(steps ?? 0)) || 0,
+            status: 'da_iniziare' as const,
+            created_at: serverTimestamp(),
+          }
+        })
+        .filter(Boolean) as Array<{
+          order_number: string
+          customer: string
+          product_code: string
+          ml: number | null
+          qty_requested: number | null
+          qty_in_oven: number | null
+          qty_done: number
+          steps_count: number
+          status: 'da_iniziare'
+          created_at: any
+        }>
+
+      if (batch.length === 0) {
+        const sample = parsed[0] || {}
+        const headers = Object.keys(sample).join(', ')
+        throw new Error('Nessuna riga valida trovata. Controlla i nomi colonna. Intestazioni viste: ' + headers)
+      }
+
+      for (const row of batch) {
+        const id = toDocId(row.order_number, row.product_code)
+        await setDoc(doc(db, 'order_items', id), row, { merge: true })
+      }
+
+      const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')))
+      setOrders(itemsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as OrderItem[])
+      alert('Import completato: ' + batch.length + ' righe')
+    } catch (e: any) {
+      console.error('Errore durante import CSV', e)
+      alert('Errore import: ' + (e?.message || String(e)))
     }
-
-    const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')))
-    setOrders(itemsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as OrderItem[])
-    alert('Import completato: ' + batch.length + ' righe')
   }
 
   // IMPORT da Google Sheet
@@ -101,8 +153,8 @@ export default function App() {
       const csvUrl = `https://docs.google.com/spreadsheets/d/${m[1]}/gviz/tq?tqx=out:csv&gid=${gid}`
       const res = await fetch(csvUrl)
       const blob = await res.blob()
-      const file = new File([blob], 'sheet.csv', { type: 'text/csv' })
-      await handleImportCSV(file)
+      const f = new File([blob], 'sheet.csv', { type: 'text/csv' })
+      await handleImportCSV(f)
     } catch (e: any) { alert('Errore import: ' + e.message) }
   }
 
@@ -119,7 +171,7 @@ export default function App() {
     const customer = prompt('Cliente:') || ''
     const product_code = prompt('Codice prodotto:') || ''
     const steps_count = Number(prompt('Numero passaggi (es. 3):') || '0') || 0
-    const id = `${order_number}__${product_code}`
+    const id = toDocId(order_number, product_code)
     const row: OrderItem = { order_number, customer, product_code, steps_count, status: 'da_iniziare' }
     await setDoc(doc(db, 'order_items', id), { ...row, created_at: serverTimestamp() }, { merge: true })
     setOrders([{ id, ...row }, ...orders])
