@@ -7,35 +7,25 @@ export type Operator = {
 export type OrderItem = {
   id?: string;
 
-  // Dati base ordine
+  // Base ordine
   order_number: string;
   customer: string;
   product_code: string;
 
   // Dati opzionali
   ml?: number | null;
-  qty_requested?: number | null;  // quantità richiesta per passaggio
+  qty_requested?: number | null;      // quantità richiesta per riga
   qty_in_oven?: number | null;
 
-  /**
-   * Pezzi COMPLETAMENTE finiti (passati da tutti i passaggi).
-   * È il min(P1..Pn). Lo ricalcoliamo a ogni STOP in App.tsx.
-   */
+  // Progressi per passaggio
+  steps_count: number;                // es. 0..9
+  steps_progress?: Record<number, number>; // { passaggio: pezzi }
+  steps_time?: Record<number, number>;     // { passaggio: secondi }
+
+  // Pezzi completamente finiti (min tra i passaggi)
   qty_done?: number | null;
 
-  /** Numero di passaggi dichiarato in import */
-  steps_count: number;
-
-  /** Avanzamento per passaggio: { 1: 80, 2: 60, ... } */
-  steps_progress?: Record<string | number, number>;
-
-  /** Tempo cumulativo per passaggio in secondi: { 1: 320, 2: 170, ... } */
-  steps_time?: Record<string | number, number>;
-
-  /** Totale pezzi imballati (opzionale) */
-  packed_qty?: number | null;
-
-  /** Stato generale */
+  // Stato lavorazione riga
   status:
     | 'da_iniziare'
     | 'in_esecuzione'
@@ -44,7 +34,22 @@ export type OrderItem = {
     | 'in_imballaggio'
     | 'pronti_consegna';
 
-  created_at?: string;
+  // Timer/state locali salvati su Firestore
+  elapsed_sec?: number | null;        // secondi accumulati quando in pausa
+  timer_start?: number | null;        // epoch ms quando parte il timer
+
+  // Ultimo STOP registrato (comodo per report)
+  last_operator?: string | null;
+  last_notes?: string | null;
+  last_step?: number | null;
+  last_pieces?: number | null;
+
+  // Imballaggio (opzionale)
+  packed_qty?: number | null;
+
+  // Timestamps Firestore
+  created_at?: any;                   // serverTimestamp
+  last_done_at?: any;                 // serverTimestamp
 };
 
 export type OrderLog = {
