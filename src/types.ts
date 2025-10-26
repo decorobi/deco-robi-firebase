@@ -14,34 +14,28 @@ export type OrderItem = {
 
   // Dati opzionali
   ml?: number | null;
-  qty_requested?: number | null;  // quantità richiesta totale (per passaggio)
+  qty_requested?: number | null;  // quantità richiesta per passaggio
   qty_in_oven?: number | null;
 
   /**
-   * Pezzi COMPLETAMENTE finiti, cioè quelli passati
-   * da TUTTI i passaggi (min(P1, P2, ..., Pn)).
-   * Lo ricalcoliamo a ogni STOP in App.tsx.
+   * Pezzi COMPLETAMENTE finiti (passati da tutti i passaggi).
+   * È il min(P1..Pn). Lo ricalcoliamo a ogni STOP in App.tsx.
    */
   qty_done?: number | null;
 
-  /**
-   * Numero totale di passaggi (da 1 a N).
-   */
+  /** Numero di passaggi dichiarato in import */
   steps_count: number;
 
-  /**
-   * Avanzamento per passaggio.
-   * Esempio: { 1: 80, 2: 60 } significa
-   *  - Passaggio 1: 80 pezzi eseguiti
-   *  - Passaggio 2: 60 pezzi eseguiti
-   */
+  /** Avanzamento per passaggio: { 1: 80, 2: 60, ... } */
   steps_progress?: Record<string | number, number>;
 
-  /**
-   * Stato dell'ordine.
-   * Va in 'eseguito' SOLO quando tutti i passaggi
-   * hanno raggiunto almeno qty_requested.
-   */
+  /** Tempo cumulativo per passaggio in secondi: { 1: 320, 2: 170, ... } */
+  steps_time?: Record<string | number, number>;
+
+  /** Totale pezzi imballati (opzionale) */
+  packed_qty?: number | null;
+
+  /** Stato generale */
   status:
     | 'da_iniziare'
     | 'in_esecuzione'
