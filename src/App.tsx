@@ -31,7 +31,6 @@ const formatTime = (sec: number) => {
   return `${h}:${m}:${s}`;
 };
 
-// ID documento sicuro (niente "/" o "\")
 const toDocId = (order: string | number, code: string) =>
   `${String(order)}__${String(code)}`
     .trim()
@@ -53,6 +52,33 @@ const pick = (row: Record<string, any>, aliases: string[]) => {
   return hit ? row[hit[0]] : undefined;
 };
 
+/* ---------- Modal semplice (overlay bloccante) ---------- */
+function Modal(props: { open: boolean; onClose: () => void; children: React.ReactNode; title?: string }) {
+  if (!props.open) return null;
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+      }}
+      onClick={props.onClose}
+    >
+      <div
+        className="card"
+        style={{ minWidth: 360, maxWidth: '90vw', padding: 16 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {props.title && <h3>{props.title}</h3>}
+        {props.children}
+        <div style={{ textAlign: 'right', marginTop: 12 }}>
+          <button className="btn btn-secondary" onClick={props.onClose}>Chiudi</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Timer state ---------- */
 type TimerState = { running: boolean; startedAt: number | null; elapsed: number; paused?: boolean };
 
 export default function App() {
@@ -62,7 +88,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
 
-  // STOP modal (bloccante)
+  // STOP modal
   const [stopOpen, setStopOpen] = useState(false);
   const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
   const [stopOperator, setStopOperator] = useState<string>('');
@@ -76,9 +102,7 @@ export default function App() {
       await ensureAnonAuth();
       const opsSnap = await getDocs(query(collection(db, 'operators'), orderBy('name')));
       setOperators(opsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Operator[]);
-      const itemsSnap = await getDocs(
-        query(collection(db, 'order_items'), orderBy('created_at', 'desc')),
-      );
+      const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')));
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
     })();
   }, []);
@@ -86,31 +110,17 @@ export default function App() {
   const kpi = useMemo(() => {
     const byStatus = (st: OrderItem['status']) => orders.filter((o) => o.status === st).length;
     const piecesToday = orders.reduce((sum, o) => sum + (o.qty_done || 0), 0);
-    return {
-      da_iniziare: byStatus('da_iniziare'),
-      in_esecuzione: byStatus('in_esecuzione'),
-      eseguiti: byStatus('eseguito'),
-      pezziOggi: piecesToday,
-      tempoOggi: 0,
-    };
+    return { da_iniziare: byStatus('da_iniziare'), in_esecuzione: byStatus('in_esecuzione'), eseguiti: byStatus('eseguito'), pezziOggi: piecesToday, tempoOggi: 0 };
   }, [orders]);
 
-  // ===== Import CSV / Google Sheet =====
+  /* ------------------- IMPORT ------------------- */
   const handleImportCSV = async (file: File) => {
     try {
       await ensureAnonAuth();
       const parsed = await new Promise<RowIn[]>((resolve, reject) => {
-        Papa.parse<RowIn>(file, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (res: ParseResult<RowIn>) => resolve(res.data as RowIn[]),
-          error: reject,
-        });
+        Papa.parse<RowIn>(file, { header: true, skipEmptyLines: true, complete: (res: ParseResult<RowIn>) => resolve(res.data as RowIn[]), error: reject });
       });
-
-      if (!parsed || parsed.length === 0) {
-        throw new Error('Il file CSV sembra vuoto o senza intestazioni.');
-      }
+      if (!parsed || parsed.length === 0) throw new Error('Il file CSV sembra vuoto o senza intestazioni.');
 
       const batch = parsed
         .map((r) => {
@@ -118,18 +128,10 @@ export default function App() {
           const customer = pick(r, ['cliente']);
           const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod']);
           const mlVal = pick(r, ['ml']);
-          const qty_requested = pick(r, [
-            'quantita inserita',
-            'quantità inserita',
-            'quantita',
-            'qty richiesta',
-            'qta richiesta',
-          ]);
+          const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta']);
           const qty_in_oven = pick(r, ['inforno', 'in forno']);
           const steps = pick(r, ['passaggi', 'n passaggi', 'passi']);
-
           if (!order_number || !product_code) return null;
-
           return {
             order_number: String(order_number),
             customer: customer ? String(customer) : '',
@@ -143,27 +145,14 @@ export default function App() {
             created_at: serverTimestamp(),
           };
         })
-        .filter(Boolean) as Array<{
-        order_number: string;
-        customer: string;
-        product_code: string;
-        ml: number | null;
-        qty_requested: number | null;
-        qty_in_oven: number | null;
-        qty_done: number;
-        steps_count: number;
-        status: 'da_iniziare';
-        created_at: any;
-      }>;
+        .filter(Boolean) as any[];
 
       for (const row of batch) {
         const id = toDocId(row.order_number, row.product_code);
         await setDoc(doc(db, 'order_items', id), row, { merge: true });
       }
 
-      const itemsSnap = await getDocs(
-        query(collection(db, 'order_items'), orderBy('created_at', 'desc')),
-      );
+      const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')));
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
       alert('Import completato: ' + batch.length + ' righe');
     } catch (e: any) {
@@ -189,24 +178,18 @@ export default function App() {
     }
   };
 
-  // ===== Admin operators =====
+  /* ------------------- ADMIN ------------------- */
   const addOperator = async () => {
     const name = prompt('Nome operatore:');
     if (!name) return;
-    const ref = await addDoc(collection(db, 'operators'), {
-      name,
-      active: true,
-      created_at: serverTimestamp(),
-    });
+    const ref = await addDoc(collection(db, 'operators'), { name, active: true, created_at: serverTimestamp() });
     setOperators([...(operators), { id: ref.id, name, active: true }]);
   };
-
   const toggleOperator = async (op: Operator) => {
     if (!op.id) return;
     await updateDoc(doc(db, 'operators', op.id), { active: !op.active });
     setOperators(operators.map((o) => (o.id === op.id ? { ...o, active: !o.active } : o)));
   };
-
   const removeOperator = async (op: Operator) => {
     if (!op.id) return;
     if (!confirm(`Eliminare operatore "${op.name}"?`)) return;
@@ -214,38 +197,26 @@ export default function App() {
     setOperators(operators.filter((o) => o.id !== op.id));
   };
 
-  // ===== Inserimento manuale =====
+  /* ------------------- MANUALE ------------------- */
   const manualInsert = async () => {
     const order_number = prompt('Numero ordine:') || '';
     const customer = prompt('Cliente:') || '';
     const product_code = prompt('Codice prodotto:') || '';
     const steps_count = Number(prompt('Numero passaggi (es. 3):') || '0') || 0;
     const id = toDocId(order_number, product_code);
-    const row: OrderItem = {
-      order_number,
-      customer,
-      product_code,
-      steps_count,
-      status: 'da_iniziare',
-    };
-    await setDoc(
-      doc(db, 'order_items', id),
-      { ...row, created_at: serverTimestamp() },
-      { merge: true },
-    );
+    const row: OrderItem = { order_number, customer, product_code, steps_count, status: 'da_iniziare' };
+    await setDoc(doc(db, 'order_items', id), { ...row, created_at: serverTimestamp() }, { merge: true });
     setOrders([{ id, ...row }, ...orders]);
   };
 
-  // ===== Timer =====
+  /* ------------------- TIMER ------------------- */
   useEffect(() => {
     const id = setInterval(() => {
       setTimers((t) => {
-        const n = { ...t };
-        const now = Date.now();
+        const n = { ...t }; const now = Date.now();
         for (const k of Object.keys(n)) {
           const tm = n[k];
-          if (tm.running && tm.startedAt)
-            n[k] = { ...tm, elapsed: Math.floor((now - tm.startedAt) / 1000) };
+          if (tm.running && tm.startedAt) n[k] = { ...tm, elapsed: Math.floor((now - tm.startedAt) / 1000) };
         }
         return n;
       });
@@ -254,24 +225,14 @@ export default function App() {
   }, []);
 
   const startTimer = (id: string) =>
-    setTimers((t) => ({
-      ...t,
-      [id]: { running: true, startedAt: Date.now(), elapsed: t[id]?.elapsed || 0, paused: false },
-    }));
+    setTimers((t) => ({ ...t, [id]: { running: true, startedAt: Date.now(), elapsed: t[id]?.elapsed || 0, paused: false } }));
 
   const pauseTimer = (id: string) =>
-    setTimers((t) => ({
-      ...t,
-      [id]: { ...(t[id] || { running: false, startedAt: null, elapsed: 0 }), running: false, paused: true },
-    }));
+    setTimers((t) => ({ ...t, [id]: { ...(t[id] || { running: false, startedAt: null, elapsed: 0 }), running: false, paused: true } }));
 
   const resumeTimer = (id: string) =>
-    setTimers((t) => ({
-      ...t,
-      [id]: { ...(t[id] || { elapsed: 0 }), running: true, startedAt: Date.now(), paused: false },
-    }));
+    setTimers((t) => ({ ...t, [id]: { ...(t[id] || { elapsed: 0 }), running: true, startedAt: Date.now(), paused: false } }));
 
-  // ===== Stop (modal con select bloccanti) =====
   const openStopModal = (o: OrderItem) => {
     setStopTarget(o);
     setStopOperator('');
@@ -286,38 +247,21 @@ export default function App() {
     const o = stopTarget;
     const tm = timers[o.id!] || { elapsed: 0 };
 
-    if (!stopOperator) {
-      alert('Seleziona un operatore');
-      return;
-    }
-    if (!stopStep || stopStep < 1 || stopStep > 10) {
-      alert('Seleziona un passaggio valido (1..10)');
-      return;
-    }
-    if (!Number.isFinite(stopPieces) || stopPieces < 0) {
-      alert('Inserisci un numero pezzi valido');
-      return;
-    }
+    if (!stopOperator) { alert('Seleziona un operatore'); return; }
+    if (!stopStep || stopStep < 1 || stopStep > 10) { alert('Seleziona un passaggio valido (1..10)'); return; }
+    if (!Number.isFinite(stopPieces) || stopPieces < 0) { alert('Inserisci un numero pezzi valido'); return; }
 
     const log: Partial<OrderLog> = {
-      order_item_id: o.id!,
-      operator_name: stopOperator,
-      step_number: stopStep,
-      pieces_done: stopPieces,
-      notes: stopNotes,
-      duration_seconds: tm.elapsed,
-      created_at: new Date().toISOString(),
+      order_item_id: o.id!, operator_name: stopOperator, step_number: stopStep,
+      pieces_done: stopPieces, notes: stopNotes, duration_seconds: tm.elapsed, created_at: new Date().toISOString()
     };
     await addDoc(collection(db, 'order_logs'), log as any);
 
     const newDone = (o.qty_done || 0) + stopPieces;
     const requested = o.qty_requested || 0;
-    // Alert > 40% della quantità richiesta (sul cumulato)
     if (requested && newDone > 0.4 * requested) {
       alert(`Attenzione: superato il 40% della quantità richiesta (${newDone}/${requested}).`);
     }
-
-    // Stato: in_esecuzione se non completato, altrimenti eseguito
     const newStatus: OrderItem['status'] = requested && newDone >= requested ? 'eseguito' : 'in_esecuzione';
     await updateDoc(doc(db, 'order_items', o.id!), { qty_done: newDone, status: newStatus });
 
@@ -327,12 +271,11 @@ export default function App() {
   };
 
   const closeOrder = async (o: OrderItem) => {
-    // chiudi ordine manualmente → eseguito
     await updateDoc(doc(db, 'order_items', o.id!), { status: 'eseguito' });
     setOrders(orders.map((x) => (x.id === o.id ? { ...x, status: 'eseguito' } : x)));
   };
 
-  // ===== Export Excel =====
+  /* ------------------- EXPORT ------------------- */
   const exportExcel = () => {
     const rows = orders.map((o) => ({
       Cliente: o.customer,
@@ -350,7 +293,7 @@ export default function App() {
     XLSX.writeFile(wb, 'riepilogo_ordini.xlsx');
   };
 
-  const filtered = orders; // (potrai filtrare per data in un secondo step)
+  const filtered = orders;
 
   const qtyWarnStyle = (o: OrderItem) => {
     const req = o.qty_requested || 0;
@@ -364,32 +307,15 @@ export default function App() {
   return (
     <div className="container">
       <div className="toolbar" style={{ marginBottom: 12 }}>
-        <label>
-          Ordini dal...{' '}
-          <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-        </label>
+        <label>Ordini dal... <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} /></label>
 
-        <input
-          type="file"
-          accept=".csv"
-          onChange={async (e) => {
-            const f = e.target.files?.[0];
-            if (f) {
-              await handleImportCSV(f);
-              e.currentTarget.value = '';
-            }
-          }}
-        />
+        <input type="file" accept=".csv" onChange={async (e) => {
+          const f = e.target.files?.[0]; if (f) { await handleImportCSV(f); e.currentTarget.value = ''; }
+        }} />
 
-        <button className="btn btn-secondary" onClick={importFromSheet}>
-          IMPORT DOC (Google Sheet)
-        </button>
-        <button className="btn btn-secondary" onClick={() => setShowAdmin(true)}>
-          ADMIN (Operatori)
-        </button>
-        <button className="btn btn-primary" onClick={manualInsert}>
-          INSERISCI ORDINE
-        </button>
+        <button className="btn btn-secondary" onClick={importFromSheet}>IMPORT DOC (Google Sheet)</button>
+        <button className="btn btn-secondary" onClick={() => setShowAdmin(true)}>ADMIN (Operatori)</button>
+        <button className="btn btn-primary" onClick={manualInsert}>INSERISCI ORDINE</button>
       </div>
 
       <div className="row">
@@ -397,34 +323,16 @@ export default function App() {
         <div className="card">
           <h2>CRUSCOTTO OPERATIVO</h2>
           <div className="kpi">
-            <div className="tile">
-              <div className="muted">Da iniziare</div>
-              <div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.da_iniziare}</div>
-            </div>
-            <div className="tile">
-              <div className="muted">In esecuzione</div>
-              <div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.in_esecuzione}</div>
-            </div>
-            <div className="tile">
-              <div className="muted">Eseguiti</div>
-              <div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.eseguiti}</div>
-            </div>
-            <div className="tile">
-              <div className="muted">Prodotti oggi</div>
-              <div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.pezziOggi}</div>
-            </div>
+            <div className="tile"><div className="muted">Da iniziare</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.da_iniziare}</div></div>
+            <div className="tile"><div className="muted">In esecuzione</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.in_esecuzione}</div></div>
+            <div className="tile"><div className="muted">Eseguiti</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.eseguiti}</div></div>
+            <div className="tile"><div className="muted">Prodotti oggi</div><div style={{ fontSize: 24, fontWeight: 800 }}>{kpi.pezziOggi}</div></div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <div className="muted" style={{ marginBottom: 6 }}>
-              Tempo eseguito oggi
-            </div>
+            <div className="muted" style={{ marginBottom: 6 }}>Tempo eseguito oggi</div>
             <div className="timer">{formatTime(kpi.tempoOggi)}</div>
           </div>
-          <div className="footer">
-            <button className="btn btn-secondary" onClick={exportExcel}>
-              SCARICO EXCEL
-            </button>
-          </div>
+          <div className="footer"><button className="btn btn-secondary" onClick={exportExcel}>SCARICO EXCEL</button></div>
         </div>
 
         {/* Destra - Ordini */}
@@ -434,76 +342,43 @@ export default function App() {
             {filtered.map((o) => {
               const tm = timers[o.id!] || { running: false, elapsed: 0, paused: false };
               const canResume = !tm.running && tm.elapsed > 0 && tm.paused;
-
               const cardStyle: React.CSSProperties =
                 o.status === 'eseguito'
                   ? { border: '1px solid #4ade80', boxShadow: '0 0 0 2px rgba(74,222,128,0.2)' }
                   : {};
+
+              const canClose = (o.qty_requested || 0) > 0 && (o.qty_done || 0) >= (o.qty_requested || 0);
+              const closeDisabled = o.status === 'eseguito';
 
               return (
                 <div key={o.id || o.order_number + o.product_code} className="card order-card" style={cardStyle}>
                   <h3>{o.customer}</h3>
                   <div className="muted">Ordine {o.order_number}</div>
                   <div className="fieldrow">
-                    <div>
-                      <label>Codice prodotto</label>
-                      <div>{o.product_code}</div>
-                    </div>
-                    <div>
-                      <label>Q.ta richiesta</label>
-                      <div>{o.qty_requested ?? '-'}</div>
-                    </div>
-                    <div>
-                      <label>Q.ta in forno</label>
-                      <div>{o.qty_in_oven ?? '-'}</div>
-                    </div>
+                    <div><label>Codice prodotto</label><div>{o.product_code}</div></div>
+                    <div><label>Q.ta richiesta</label><div>{o.qty_requested ?? '-'}</div></div>
+                    <div><label>Q.ta in forno</label><div>{o.qty_in_oven ?? '-'}</div></div>
                   </div>
                   <div className="fieldrow">
-                    <div>
-                      <label>Q.ta eseguita</label>
-                      <div className="pill" style={qtyWarnStyle(o)}>{o.qty_done ?? 0}</div>
-                    </div>
-                    <div>
-                      <label>Passaggi</label>
-                      <div>{o.steps_count}</div>
-                    </div>
-                    <div>
-                      <label>Stato</label>
-                      <div className="pill">{o.status}</div>
-                    </div>
+                    <div><label>Q.ta eseguita</label><div className="pill" style={qtyWarnStyle(o)}>{o.qty_done ?? 0}</div></div>
+                    <div><label>Passaggi</label><div>{o.steps_count}</div></div>
+                    <div><label>Stato</label><div className="pill">{o.status}</div></div>
                   </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginTop: 8,
-                      gap: 8,
-                      flexWrap: 'wrap',
-                    }}
-                  >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
                     <div className="timer">{formatTime(tm.elapsed)}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       {!tm.running && !canResume && (
-                        <button className="btn btn-primary" onClick={() => startTimer(o.id! || o.order_number)}>
-                          Start
-                        </button>
+                        <button className="btn btn-primary" onClick={() => startTimer(o.id! || o.order_number)}>Start</button>
                       )}
                       {tm.running && (
-                        <button className="btn btn-secondary" onClick={() => pauseTimer(o.id! || o.order_number)}>
-                          Pausa
-                        </button>
+                        <button className="btn btn-secondary" onClick={() => pauseTimer(o.id! || o.order_number)}>Pausa</button>
                       )}
                       {canResume && (
-                        <button className="btn btn-primary" onClick={() => resumeTimer(o.id! || o.order_number)}>
-                          Riprendi
-                        </button>
+                        <button className="btn btn-primary" onClick={() => resumeTimer(o.id! || o.order_number)}>Riprendi</button>
                       )}
-                      <button className="btn btn-danger" onClick={() => openStopModal(o)}>
-                        Stop
-                      </button>
-                      {(o.qty_requested || 0) > 0 && (o.qty_done || 0) >= (o.qty_requested || 0) && (
-                        <button className="btn" style={{ background: '#4ade80' }} onClick={() => closeOrder(o)}>
+                      <button className="btn btn-danger" onClick={() => openStopModal(o)}>Stop</button>
+                      {canClose && (
+                        <button className="btn" style={{ background: '#4ade80' }} disabled={closeDisabled} onClick={() => closeOrder(o)}>
                           Chiudi ordine
                         </button>
                       )}
@@ -517,16 +392,13 @@ export default function App() {
       </div>
 
       {/* Admin Operatori */}
-      <dialog open={showAdmin} onClose={() => setShowAdmin(false)}>
-        <h3>Operatori</h3>
+      <Modal open={showAdmin} onClose={() => setShowAdmin(false)} title="Operatori">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '8px 0', minWidth: 320 }}>
           {operators.map((op) => (
             <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
               <span className={'pill ' + (op.active ? 'done' : '')}>{op.name}</span>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn btn-secondary" onClick={() => toggleOperator(op)}>
-                  {op.active ? 'Disattiva' : 'Attiva'}
-                </button>
+                <button className="btn btn-secondary" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
                 <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
               </div>
             </div>
@@ -534,13 +406,11 @@ export default function App() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-primary" onClick={addOperator}>Aggiungi operatore</button>
-          <button className="btn btn-secondary" onClick={() => setShowAdmin(false)}>Chiudi</button>
         </div>
-      </dialog>
+      </Modal>
 
-      {/* STOP MODAL */}
-      <dialog open={stopOpen} onClose={() => setStopOpen(false)}>
-        <h3>Registra produzione</h3>
+      {/* Stop modal */}
+      <Modal open={stopOpen} onClose={() => setStopOpen(false)} title="Registra produzione">
         <div style={{ display: 'grid', gap: 8, minWidth: 320 }}>
           <label>
             Operatore
@@ -568,11 +438,10 @@ export default function App() {
             <input type="text" value={stopNotes} onChange={(e) => setStopNotes(e.target.value)} placeholder="opzionale" />
           </label>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
           <button className="btn btn-primary" onClick={confirmStop}>Conferma</button>
-          <button className="btn btn-secondary" onClick={() => setStopOpen(false)}>Annulla</button>
         </div>
-      </dialog>
+      </Modal>
     </div>
   );
 }
