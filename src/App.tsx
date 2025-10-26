@@ -78,7 +78,7 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
   );
 }
 
-/* ---------- Timer state ---------- */
+/* ---------- Timer ---------- */
 type TimerState = { running: boolean; startedAt: number | null; elapsed: number; paused?: boolean };
 
 export default function App() {
@@ -259,9 +259,8 @@ export default function App() {
 
     const newDone = (o.qty_done || 0) + stopPieces;
     const requested = o.qty_requested || 0;
-    if (requested && newDone > 0.4 * requested) {
-      alert(`Attenzione: superato il 40% della quantità richiesta (${newDone}/${requested}).`);
-    }
+
+    // Se ho raggiunto/superato la richiesta, passo direttamente a "eseguito"
     const newStatus: OrderItem['status'] = requested && newDone >= requested ? 'eseguito' : 'in_esecuzione';
     await updateDoc(doc(db, 'order_items', o.id!), { qty_done: newDone, status: newStatus });
 
@@ -294,6 +293,8 @@ export default function App() {
   };
 
   const filtered = orders;
+  const executed = filtered.filter(o => o.status === 'eseguito');
+  const active = filtered.filter(o => o.status !== 'eseguito');
 
   const qtyWarnStyle = (o: OrderItem) => {
     const req = o.qty_requested || 0;
@@ -319,7 +320,7 @@ export default function App() {
       </div>
 
       <div className="row">
-        {/* Sinistra - Cruscotto */}
+        {/* Colonna sinistra: Cruscotto + Completati */}
         <div className="card">
           <h2>CRUSCOTTO OPERATIVO</h2>
           <div className="kpi">
@@ -335,11 +336,25 @@ export default function App() {
           <div className="footer"><button className="btn btn-secondary" onClick={exportExcel}>SCARICO EXCEL</button></div>
         </div>
 
-        {/* Destra - Ordini */}
+        {executed.length > 0 && (
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3>Completati (passano al reparto successivo)</h3>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {executed.map(o => (
+                <div key={o.id} className="card" style={{ border: '1px solid #4ade80' }}>
+                  <strong>{o.customer}</strong> — Ordine {o.order_number} — <span className="pill">eseguito</span>
+                  <div className="muted">Codice: {o.product_code} • Eseguiti: {o.qty_done ?? 0} / {o.qty_requested ?? '-'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Colonna destra: Ordini attivi */}
         <div className="card">
           <h2>Ordini</h2>
           <div className="orders">
-            {filtered.map((o) => {
+            {active.map((o) => {
               const tm = timers[o.id!] || { running: false, elapsed: 0, paused: false };
               const canResume = !tm.running && tm.elapsed > 0 && tm.paused;
               const cardStyle: React.CSSProperties =
@@ -347,8 +362,9 @@ export default function App() {
                   ? { border: '1px solid #4ade80', boxShadow: '0 0 0 2px rgba(74,222,128,0.2)' }
                   : {};
 
-              const canClose = (o.qty_requested || 0) > 0 && (o.qty_done || 0) >= (o.qty_requested || 0);
-              const closeDisabled = o.status === 'eseguito';
+              const requested = o.qty_requested || 0;
+              const done = o.qty_done || 0;
+              const canClose = requested > 0 && done >= requested && o.status !== 'eseguito';
 
               return (
                 <div key={o.id || o.order_number + o.product_code} className="card order-card" style={cardStyle}>
@@ -356,11 +372,11 @@ export default function App() {
                   <div className="muted">Ordine {o.order_number}</div>
                   <div className="fieldrow">
                     <div><label>Codice prodotto</label><div>{o.product_code}</div></div>
-                    <div><label>Q.ta richiesta</label><div>{o.qty_requested ?? '-'}</div></div>
+                    <div><label>Q.ta richiesta</label><div>{requested || '-'}</div></div>
                     <div><label>Q.ta in forno</label><div>{o.qty_in_oven ?? '-'}</div></div>
                   </div>
                   <div className="fieldrow">
-                    <div><label>Q.ta eseguita</label><div className="pill" style={qtyWarnStyle(o)}>{o.qty_done ?? 0}</div></div>
+                    <div><label>Q.ta eseguita</label><div className="pill" style={qtyWarnStyle(o)}>{done}</div></div>
                     <div><label>Passaggi</label><div>{o.steps_count}</div></div>
                     <div><label>Stato</label><div className="pill">{o.status}</div></div>
                   </div>
@@ -378,7 +394,7 @@ export default function App() {
                       )}
                       <button className="btn btn-danger" onClick={() => openStopModal(o)}>Stop</button>
                       {canClose && (
-                        <button className="btn" style={{ background: '#4ade80' }} disabled={closeDisabled} onClick={() => closeOrder(o)}>
+                        <button className="btn" style={{ background: '#22c55e' }} onClick={() => closeOrder(o)}>
                           Chiudi ordine
                         </button>
                       )}
