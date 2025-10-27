@@ -33,7 +33,6 @@ function secToHMS(total: number = 0) {
   return `${h}:${m}:${s}`;
 }
 
-// Aggrega tempo e pezzi per passaggio per una riga
 type StepAgg = { step: number; pieces: number; timeSec: number };
 function aggregateStepStats(row: any): StepAgg[] {
   const time = (row?.steps_time ?? {}) as Record<string | number, number>;
@@ -83,7 +82,7 @@ function getDayBounds(date: Date) {
   return { start, end };
 }
 
-/** Calcola qty_done come "pezzi realmente finiti", min tra i passaggi */
+/** qty_done = min tra i passaggi (pezzi realmente finiti) */
 function computeFullyDone(
   stepsCount: number,
   stepsProgress: Record<string | number, number> | undefined,
@@ -135,7 +134,7 @@ export default function App() {
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
 
-  // MODALS
+  // MODALS: stop / admin / nuovo ordine / note / avanzamento completati
   const [stopOpen, setStopOpen] = useState(false);
   const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
   const [stopOperator, setStopOperator] = useState<string>('');
@@ -155,6 +154,14 @@ export default function App() {
     qty_requested: '' as any,
     steps_count: 0,
   });
+
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesTarget, setNotesTarget] = useState<OrderItem | null>(null);
+
+  const [advanceOpen, setAdvanceOpen] = useState(false);
+  const [advanceTarget, setAdvanceTarget] = useState<OrderItem | null>(null);
+  const [advancePhase, setAdvancePhase] = useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
+  const [advancePacked, setAdvancePacked] = useState<number>(0);
 
   // CRUSCOTTO: filtro "Ordini dal ..."
   const [filterFrom, setFilterFrom] = useState<string>(''); // yyyy-mm-dd
@@ -182,6 +189,7 @@ export default function App() {
     });
   }, [orders, filterFrom]);
 
+  // KPI cruscotto (sulla lista filtrata)
   const kpi = useMemo(() => {
     const byStatus = (st: OrderItem['status']) => filteredOrders.filter((o) => o.status === st).length;
     return {
@@ -245,6 +253,7 @@ export default function App() {
             packed_qty: 0,
             status: 'da_iniziare' as const,
             created_at: serverTimestamp(),
+            notes_log: [],             // storico note
           };
         })
         .filter(Boolean) as any[];
@@ -280,7 +289,6 @@ export default function App() {
     );
   };
 
-  // PAUSA: salva il tempo e imposta stato "pausato"
   const onPause = async (row: any) => {
     const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
     const now = Date.now();
@@ -307,7 +315,6 @@ export default function App() {
     );
   };
 
-  // RIPRENDI: riparte e torna "in_esecuzione"
   const onResume = async (row: any) => {
     const prevElapsed = Number(timers[row.id!]?.elapsed ?? row.elapsed_sec ?? 0);
     setTimers((t) => ({
@@ -354,13 +361,29 @@ export default function App() {
     const nextStepsProg: Record<number, number> = { ...(row.steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
-    // ricalcola qty_done (pezzi finiti su tutti i passaggi)
+    // qty finita (min tra i passaggi)
     const qtyDone = computeFullyDone(Number(row.steps_count || 0), nextStepsProg, 0);
+
+    // note log (append)
+    const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
+    if (stopNotes && stopNotes.trim()) {
+      notesLog.push({
+        ts: new Date().toISOString(),
+        operator: stopOperator || null,
+        text: stopNotes.trim(),
+        step: pass,
+        pieces: Number(stopPieces || 0),
+      });
+    }
+
+    // se finito tutto → eseguito
+    const richiesta = Number(row.qty_requested || 0);
+    const isCompleted = richiesta > 0 && qtyDone >= richiesta;
 
     await setDoc(
       doc(db, 'order_items', row.id!),
       {
-        status: 'da_iniziare',
+        status: isCompleted ? 'eseguito' : 'da_iniziare',
         elapsed_sec: 0,
         timer_start: null,
         last_done_at: serverTimestamp(),
@@ -371,8 +394,8 @@ export default function App() {
         last_notes: stopNotes || null,
         last_step: pass,
         last_pieces: Number(stopPieces || 0),
-        // per cruscotto "tempo eseguito oggi"
         last_duration_sec: spentSec,
+        notes_log: notesLog,
       } as any,
       { merge: true }
     );
@@ -384,7 +407,7 @@ export default function App() {
         o.id === row.id
           ? {
               ...o,
-              status: 'da_iniziare',
+              status: isCompleted ? 'eseguito' : 'da_iniziare',
               elapsed_sec: 0,
               timer_start: null,
               steps_time: nextStepsTime,
@@ -396,6 +419,7 @@ export default function App() {
               last_pieces: Number(stopPieces || 0),
               last_duration_sec: spentSec,
               last_done_at: new Date() as any,
+              notes_log: notesLog,
             }
           : o
       ) as any
@@ -445,6 +469,7 @@ export default function App() {
       packed_qty: 0,
       status: 'da_iniziare' as const,
       created_at: serverTimestamp(),
+      notes_log: [],
     };
 
     const id = toDocId(row.order_number, row.product_code);
@@ -455,9 +480,33 @@ export default function App() {
     setNewOrder({ order_number: '', customer: '', product_code: '', ml: '' as any, qty_requested: '' as any, steps_count: 0 });
   };
 
-  /* ------------------- EXPORT ------------------- */
+  /* ------------------- Avanzamento da "Completati" ------------------- */
+  const openAdvance = (row: any) => {
+    setAdvanceTarget(row);
+    setAdvancePhase('in_essiccazione');
+    setAdvancePacked(0);
+    setAdvanceOpen(true);
+  };
+
+  const confirmAdvance = async () => {
+    if (!advanceTarget) return;
+    const id = advanceTarget.id!;
+    const patch: any = { status: advancePhase };
+
+    if (advancePhase === 'in_imballaggio' && advancePacked > 0) {
+      patch.packed_qty = Number(advancePacked);
+    }
+    if (advancePhase === 'pronti_consegna' && typeof advanceTarget.packed_qty !== 'number') {
+      patch.packed_qty = Number(advanceTarget.qty_requested || 0);
+    }
+
+    await updateDoc(doc(db, 'order_items', id), patch);
+    setOrders((prev) => prev.map((o: any) => (o.id === id ? { ...o, ...patch } : o)));
+    setAdvanceOpen(false);
+  };
+
+  /* ------------------- EXPORT (solo sul cruscotto) ------------------- */
   const exportExcel = () => {
-    // RIEPILOGO: usa gli ordini filtrati dal cruscotto
     const rows = filteredOrders.map((o: any) => {
       const richiesta = Number(o.qty_requested ?? 0);
       const fatta = Number(o.qty_done ?? 0);
@@ -474,7 +523,6 @@ export default function App() {
       };
     });
 
-    // Foglio 2: Aggregato tempi per passaggio (su filtrati)
     const aggRows: Array<{ Ordine: any; Riga: string; Passaggio: number; Pezzi: number; Tempo: string }> = [];
     filteredOrders.forEach((o: any, idx: number) => {
       const stats = aggregateStepStats(o);
@@ -517,22 +565,23 @@ export default function App() {
     );
   };
 
+  const completati = useMemo(
+    () => orders.filter((o) => o.status === 'eseguito'),
+    [orders]
+  );
+
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* Top bar */}
+      {/* Top bar: tolto Scarico Excel qui */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <input type="file" accept=".csv,.txt" onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])} />
-        <button className="btn" onClick={exportExcel}>Scarico Excel</button>
         <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
         <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
-        <div style={{ marginLeft: 'auto' }}>
-          {/* spazio vuoto, KPI nel cruscotto a destra */}
-        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
         {/* TABELLA ORDINI */}
         <div className="table-wrap">
           <table className="table" style={{ width: '100%' }}>
@@ -603,6 +652,12 @@ export default function App() {
                         </button>
 
                         <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
+
+                        {(row.notes_log && row.notes_log.length > 0) && (
+                          <button className="btn" onClick={() => { setNotesTarget(row); setNotesOpen(true); }}>
+                            Vedi note
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -628,7 +683,7 @@ export default function App() {
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
               <div>Ordini: <strong>da iniziare</strong> n° {kpi.da_iniziare}</div>
               <div>Ordini: <strong>in esecuzione</strong> n° {kpi.in_esecuzione}</div>
-              <div>Ordini: <strong>eseguiti</strong> n° {kpi.eseguiti}</div>
+              <div>Ordini: <strong>eseguiti (completati)</strong> n° {kpi.eseguiti}</div>
             </div>
 
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
@@ -639,6 +694,25 @@ export default function App() {
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
               <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
             </div>
+
+            {/* elenco completati con avanzamento fase */}
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Completati</div>
+              <div style={{ maxHeight: 240, overflow: 'auto', display: 'grid', gap: 6 }}>
+                {completati.length === 0 && <div style={{ opacity: 0.7 }}>— nessun ordine completato —</div>}
+                {completati.map((o) => (
+                  <button
+                    key={o.id}
+                    className="btn"
+                    onClick={() => openAdvance(o as any)}
+                    style={{ justifyContent: 'space-between' }}
+                  >
+                    <span>{o.order_number} · {o.product_code}</span>
+                    <span style={{ opacity: 0.8 }}>{o.qty_done}/{o.qty_requested}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </aside>
       </div>
@@ -647,8 +721,15 @@ export default function App() {
       <Modal open={stopOpen} onClose={() => setStopOpen(false)} title="Concludi lavorazione">
         <div className="grid" style={{ display: 'grid', gap: 8 }}>
           <label>
-            <div>Passaggio eseguito (1–9)</div>
-            <input type="number" min={1} max={9} value={stopStep} onChange={(e) => setStopStep(Number(e.target.value || 1))} />
+            <div>Passaggio eseguito</div>
+            <select
+              value={stopStep}
+              onChange={(e) => setStopStep(Number(e.target.value))}
+            >
+              {Array.from({ length: Math.max(1, Math.min(10, Number(stopTarget?.steps_count || 10))) }).map((_, i) => (
+                <option key={i+1} value={i+1}>{i+1}</option>
+              ))}
+            </select>
           </label>
           <label>
             <div>Pezzi (quantità fatta)</div>
@@ -668,6 +749,51 @@ export default function App() {
         </div>
         <div style={{ textAlign: 'right', marginTop: 12 }}>
           <button className="btn btn-danger" onClick={confirmStop}>Registra</button>
+        </div>
+      </Modal>
+
+      {/* NOTE MODAL */}
+      <Modal open={notesOpen} onClose={() => setNotesOpen(false)} title="Note ordine">
+        <div style={{ display: 'grid', gap: 8, maxHeight: 360, overflow: 'auto' }}>
+          {(!notesTarget?.notes_log || notesTarget.notes_log.length === 0) && (
+            <div>Nessuna nota.</div>
+          )}
+          {(notesTarget?.notes_log ?? []).slice().reverse().map((n: any, idx: number) => (
+            <div key={idx} style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                {new Date(n.ts).toLocaleString()} • {n.operator || '—'} • Pass. {n.step} • {n.pieces} pz
+              </div>
+              <div>{n.text}</div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      {/* AVANZA FASE (da completati) */}
+      <Modal open={advanceOpen} onClose={() => setAdvanceOpen(false)} title="Avanza fase ordine completato">
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div><strong>{advanceTarget?.order_number}</strong> · {advanceTarget?.product_code}</div>
+          <label>
+            <div>Quale passaggio vuoi eseguire ora?</div>
+            <select value={advancePhase} onChange={(e) => setAdvancePhase(e.target.value as any)}>
+              <option value="in_essiccazione">IN ESSICCAZIONE</option>
+              <option value="in_imballaggio">IN IMBALLAGGIO</option>
+              <option value="pronti_consegna">PRONTI PER LA CONSEGNA</option>
+            </select>
+          </label>
+
+          {advancePhase === 'in_imballaggio' && (
+            <label>
+              <div>Pezzi imballati (opzionale ora)</div>
+              <input type="number" min={0} step={1} value={advancePacked} onChange={(e) => setAdvancePacked(Number(e.target.value || 0))} />
+            </label>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+          {advancePhase === 'in_imballaggio' && (
+            <button className="btn" onClick={() => { setAdvancePhase('pronti_consegna'); }}>FINE IMBALLO → PRONTI PER LA CONSEGNA</button>
+          )}
+          <button className="btn btn-primary" onClick={confirmAdvance}>Salva</button>
         </div>
       </Modal>
 
