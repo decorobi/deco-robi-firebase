@@ -133,6 +133,28 @@ export default function App() {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
+  const [tick, setTick] = useState(0); // forza il re-render del timer
+
+  // stile per far lampeggiare "Riprendi"
+  const [hasBlinkStyle] = useState(() => {
+    const id = 'blink-style';
+    if (!document.getElementById(id)) {
+      const el = document.createElement('style');
+      el.id = id;
+      el.innerHTML = `
+        @keyframes blinkPulse {
+          0% { transform: scale(1); filter: brightness(1); }
+          50% { transform: scale(1.03); filter: brightness(1.25); }
+          100% { transform: scale(1); filter: brightness(1); }
+        }
+        .blink {
+          animation: blinkPulse 1s ease-in-out infinite;
+        }
+      `;
+      document.head.appendChild(el);
+    }
+    return true;
+  });
 
   // MODALS: stop / admin / nuovo ordine / note / avanzamento completati
   const [stopOpen, setStopOpen] = useState(false);
@@ -176,6 +198,14 @@ export default function App() {
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
     })();
   }, []);
+
+  // TICK del timer: gira solo se c'è almeno un timer running
+  useEffect(() => {
+    const anyRunning = Object.values(timers).some(t => t.running);
+    if (!anyRunning) return;
+    const h = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(h);
+  }, [timers]);
 
   // Ordini filtrati dal "from"
   const filteredOrders = useMemo(() => {
@@ -496,10 +526,7 @@ export default function App() {
       status_changed_at: serverTimestamp(),
     };
 
-    // input imballati: mostrato sia in IMBALLAGGIO (opzionale) che in PRONTI (obbligatorio)
-    if (advancePhase === 'in_imballaggio' && advancePacked > 0) {
-      patch.packed_qty = Number(advancePacked);
-    }
+    // Mostra input "Quanti pezzi imballati?" SOLO per PRONTI PER LA CONSEGNA (obbligatorio)
     if (advancePhase === 'pronti_consegna') {
       if (!advancePacked || advancePacked <= 0) {
         alert('Inserisci i pezzi imballati per passare a PRONTI PER LA CONSEGNA');
@@ -644,6 +671,8 @@ export default function App() {
               {orders.map((row: any) => {
                 const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
                 const now = Date.now();
+                // uso tick per forzare il rerender ogni secondo quando ci sono timer running
+                const _ = tick; // eslint-disable-line @typescript-eslint/no-unused-vars
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
                 const richiesta = Number(row.qty_requested ?? 0);
@@ -677,16 +706,19 @@ export default function App() {
                           Start
                         </button>
 
-                        <button
-                          className="btn btn-warning"
-                          disabled={row.status !== 'in_esecuzione'}
-                          onClick={() => onPause(row)}
-                        >
-                          Pausa
-                        </button>
+                        {/* Mostro il tasto Pausa SOLO mentre è in esecuzione */}
+                        {row.status === 'in_esecuzione' && (
+                          <button
+                            className="btn btn-warning"
+                            onClick={() => onPause(row)}
+                          >
+                            Pausa
+                          </button>
+                        )}
 
+                        {/* Riprendi lampeggia quando sono in pausa */}
                         <button
-                          className="btn btn-success"
+                          className={`btn btn-success ${row.status === 'pausato' ? 'blink' : ''}`}
                           disabled={row.status !== 'pausato'}
                           onClick={() => onResume(row)}
                         >
@@ -828,7 +860,8 @@ export default function App() {
             </select>
           </label>
 
-          {(advancePhase === 'in_imballaggio' || advancePhase === 'pronti_consegna') && (
+          {/* input imballati solo per PRONTI PER LA CONSEGNA */}
+          {advancePhase === 'pronti_consegna' && (
             <label>
               <div>Quanti pezzi imballati?</div>
               <input
@@ -842,11 +875,6 @@ export default function App() {
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-          {advancePhase === 'in_imballaggio' && (
-            <button className="btn" onClick={() => { setAdvancePhase('pronti_consegna'); }}>
-              FINE IMBALLO → PRONTI PER LA CONSEGNA
-            </button>
-          )}
           <button className="btn btn-primary" onClick={confirmAdvance}>Salva</button>
         </div>
       </Modal>
