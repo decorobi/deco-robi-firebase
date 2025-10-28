@@ -491,17 +491,29 @@ export default function App() {
   const confirmAdvance = async () => {
     if (!advanceTarget) return;
     const id = advanceTarget.id!;
-    const patch: any = { status: advancePhase };
+    const patch: any = {
+      status: advancePhase,
+      status_changed_at: serverTimestamp(),
+    };
 
+    // input imballati: mostrato sia in IMBALLAGGIO (opzionale) che in PRONTI (obbligatorio)
     if (advancePhase === 'in_imballaggio' && advancePacked > 0) {
       patch.packed_qty = Number(advancePacked);
     }
-    if (advancePhase === 'pronti_consegna' && typeof advanceTarget.packed_qty !== 'number') {
-      patch.packed_qty = Number(advanceTarget.qty_requested || 0);
+    if (advancePhase === 'pronti_consegna') {
+      if (!advancePacked || advancePacked <= 0) {
+        alert('Inserisci i pezzi imballati per passare a PRONTI PER LA CONSEGNA');
+        return;
+      }
+      patch.packed_qty = Number(advancePacked);
     }
 
     await updateDoc(doc(db, 'order_items', id), patch);
-    setOrders((prev) => prev.map((o: any) => (o.id === id ? { ...o, ...patch } : o)));
+    setOrders((prev) =>
+      prev.map((o: any) =>
+        o.id === id ? { ...o, ...patch, status_changed_at: new Date() as any } : o
+      )
+    );
     setAdvanceOpen(false);
   };
 
@@ -565,16 +577,46 @@ export default function App() {
     );
   };
 
-  const completati = useMemo(
-    () => orders.filter((o) => o.status === 'eseguito'),
-    [orders]
-  );
+  // Lista “Completati” + fasi successive, con filtro 7 giorni per "pronti_consegna"
+  const completati = useMemo(() => {
+    const now = Date.now();
+    const week = 7 * 24 * 3600 * 1000;
+    return orders.filter((o: any) => {
+      const keep =
+        o.status === 'eseguito' ||
+        o.status === 'in_essiccazione' ||
+        o.status === 'in_imballaggio' ||
+        o.status === 'pronti_consegna';
+      if (!keep) return false;
+
+      if (o.status === 'pronti_consegna') {
+        const sca: any = o.status_changed_at;
+        const ts = sca?.toMillis ? sca.toMillis() : (typeof sca === 'number' ? sca : null);
+        if (ts && now - ts > week) return false; // nascondi se più vecchio di 7 giorni
+      }
+      return true;
+    });
+  }, [orders]);
+
+  const badgeColor = (s: OrderItem['status']) => {
+    if (s === 'in_essiccazione') return '#b30d0d';     // rosso
+    if (s === 'in_imballaggio') return '#d87f1f';      // arancio
+    if (s === 'pronti_consegna') return '#168a3d';     // verde
+    return '#666';                                     // grigio (eseguito)
+  };
+
+  const badgeLabel = (s: OrderItem['status']) => {
+    if (s === 'in_essiccazione') return 'ESSICCAZIONE';
+    if (s === 'in_imballaggio') return 'IMBALLAGGIO';
+    if (s === 'pronti_consegna') return 'PRONTI';
+    return 'COMPLETATO';
+  };
 
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* Top bar: tolto Scarico Excel qui */}
+      {/* Top bar */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <input type="file" accept=".csv,.txt" onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])} />
         <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
@@ -695,20 +737,24 @@ export default function App() {
               <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
             </div>
 
-            {/* elenco completati con avanzamento fase */}
+            {/* elenco completati + fasi */}
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Completati</div>
-              <div style={{ maxHeight: 240, overflow: 'auto', display: 'grid', gap: 6 }}>
-                {completati.length === 0 && <div style={{ opacity: 0.7 }}>— nessun ordine completato —</div>}
+              <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
+                {completati.length === 0 && <div style={{ opacity: 0.7 }}>— nessun ordine —</div>}
                 {completati.map((o) => (
                   <button
                     key={o.id}
                     className="btn"
                     onClick={() => openAdvance(o as any)}
-                    style={{ justifyContent: 'space-between' }}
+                    style={{
+                      justifyContent: 'space-between',
+                      background: badgeColor(o.status),
+                      color: 'white'
+                    }}
                   >
                     <span>{o.order_number} · {o.product_code}</span>
-                    <span style={{ opacity: 0.8 }}>{o.qty_done}/{o.qty_requested}</span>
+                    <span style={{ opacity: 0.9, fontSize: 12 }}>{badgeLabel(o.status)}</span>
                   </button>
                 ))}
               </div>
@@ -782,16 +828,24 @@ export default function App() {
             </select>
           </label>
 
-          {advancePhase === 'in_imballaggio' && (
+          {(advancePhase === 'in_imballaggio' || advancePhase === 'pronti_consegna') && (
             <label>
-              <div>Pezzi imballati (opzionale ora)</div>
-              <input type="number" min={0} step={1} value={advancePacked} onChange={(e) => setAdvancePacked(Number(e.target.value || 0))} />
+              <div>Quanti pezzi imballati?</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={advancePacked}
+                onChange={(e) => setAdvancePacked(Number(e.target.value || 0))}
+              />
             </label>
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
           {advancePhase === 'in_imballaggio' && (
-            <button className="btn" onClick={() => { setAdvancePhase('pronti_consegna'); }}>FINE IMBALLO → PRONTI PER LA CONSEGNA</button>
+            <button className="btn" onClick={() => { setAdvancePhase('pronti_consegna'); }}>
+              FINE IMBALLO → PRONTI PER LA CONSEGNA
+            </button>
           )}
           <button className="btn btn-primary" onClick={confirmAdvance}>Salva</button>
         </div>
