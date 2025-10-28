@@ -181,6 +181,7 @@ export default function App() {
     order_number: '',
     customer: '',
     product_code: '',
+    description: '',       // <-- nuovo campo
     ml: '' as any,
     qty_requested: '' as any,
     steps_count: 0,
@@ -286,6 +287,7 @@ export default function App() {
           const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
           const customer = pick(r, ['cliente']);
           const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod']);
+          const description = pick(r, ['descrizione', 'descr', 'descrizione prodotto', 'desc', 'descr.']); // <-- descrizione dal CSV
           const mlVal = pick(r, ['ml']);
           const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta']);
           const qty_in_oven = pick(r, ['inforno', 'in forno']);
@@ -295,6 +297,7 @@ export default function App() {
             order_number: String(order_number),
             customer: customer ? String(customer) : '',
             product_code: String(product_code),
+            description: description ? String(description) : '',   // <-- salvo la descrizione
             ml: parseNumberIT(mlVal ?? null),
             qty_requested: parseNumberIT(qty_requested ?? null),
             qty_in_oven: parseNumberIT(qty_in_oven ?? null),
@@ -306,7 +309,6 @@ export default function App() {
             status: 'da_iniziare' as const,
             created_at: serverTimestamp(),
             hidden: false,
-            // notes_log non tipizzato nel tuo types: lo tratto come any
             notes_log: [],
           };
         })
@@ -533,6 +535,7 @@ export default function App() {
       order_number,
       customer: newOrder.customer.trim(),
       product_code,
+      description: newOrder.description.trim(),  // <-- salva descrizione
       ml: parseNumberIT(newOrder.ml),
       qty_requested: parseNumberIT(newOrder.qty_requested) ?? 0,
       qty_in_oven: 0,
@@ -552,7 +555,15 @@ export default function App() {
 
     setOrders((prev) => [{ id, ...(row as any) }, ...prev]);
     setNewOrderOpen(false);
-    setNewOrder({ order_number: '', customer: '', product_code: '', ml: '' as any, qty_requested: '' as any, steps_count: 0 });
+    setNewOrder({
+      order_number: '',
+      customer: '',
+      product_code: '',
+      description: '',
+      ml: '' as any,
+      qty_requested: '' as any,
+      steps_count: 0
+    });
   };
 
   /* ------------------- Avanzamento (completati) ------------------- */
@@ -595,6 +606,7 @@ export default function App() {
         Ordine: o.order_number,
         Cliente: o.customer || '',
         Codice: o.product_code,
+        Descrizione: (o as any).description || '',    // <-- descrizione in export
         ML: o.ml ?? '',
         'Q.ta richiesta': richiesta,
         'Q.ta fatta': fatta,
@@ -696,7 +708,7 @@ export default function App() {
         <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
         {/* TABELLA ORDINI (FILTRATA + NON NASCOSTA) */}
         <div className="table-wrap">
           <table className="table" style={{ width: '100%' }}>
@@ -705,6 +717,7 @@ export default function App() {
                 <th>Ordine</th>
                 <th>Cliente</th>
                 <th>Codice</th>
+                <th>Descrizione</th>{/* <-- nuova colonna */}
                 <th>Q.ta rich.</th>
                 <th>Q.ta fatta</th>
                 <th>Rimanenti</th>
@@ -729,6 +742,20 @@ export default function App() {
                     <td><strong>{row.order_number}</strong></td>
                     <td>{row.customer || ''}</td>
                     <td>{row.product_code}</td>
+                    <td>
+                      <div
+                        title={(row as any).description || ''}
+                        style={{
+                          maxWidth: 280,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          opacity: (row as any).description ? 1 : 0.6
+                        }}
+                      >
+                        {(row as any).description || '—'}
+                      </div>
+                    </td>
                     <td>{richiesta || ''}</td>
                     <td>{fatta}</td>
                     <td>{rimanente}</td>
@@ -781,7 +808,7 @@ export default function App() {
           </table>
         </div>
 
-        {/* CRUSCOTTO OPERATIVO */}
+        {/* CRUSCOTTO OPERATIVO (ristretto) */}
         <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
           <h3 style={{ marginTop: 0 }}>CRUSCOTTO OPERATIVO</h3>
           <div style={{ display: 'grid', gap: 8 }}>
@@ -820,8 +847,11 @@ export default function App() {
                       background: badgeColor(o.status, (o as any).qty_done as any),
                       color: 'white'
                     }}
+                    title={(o as any).description || ''}
                   >
-                    <span>{o.order_number} · {o.product_code}</span>
+                    <span style={{ textAlign: 'left' }}>
+                      {o.order_number} · {o.product_code}
+                    </span>
                     <span style={{ opacity: 0.9, fontSize: 12 }}>
                       {badgeLabel(o.status, (o as any).qty_done as any)}{' '}
                       {(o as any).qty_done ? `(${(o as any).qty_done}/${o.qty_requested})` : ''}
@@ -1000,6 +1030,10 @@ export default function App() {
           <label>
             <div>Codice Prodotto *</div>
             <input value={newOrder.product_code} onChange={(e) => setNewOrder({ ...newOrder, product_code: e.target.value })} />
+          </label>
+          <label>
+            <div>Descrizione</div>
+            <input value={newOrder.description} onChange={(e) => setNewOrder({ ...newOrder, description: e.target.value })} />
           </label>
           <label>
             <div>ML</div>
