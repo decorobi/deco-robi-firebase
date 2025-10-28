@@ -19,9 +19,25 @@ import {
 
 type RowIn = Record<string, any>;
 
-const asNumber = (v: any) => {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(String(v).replace(',', '.'));
+/** Parsing “italiano”: 1.500 -> 1500, 1,5 -> 1.5, 1.500,25 -> 1500.25 */
+const parseNumberIT = (v: any): number | null => {
+  if (v === null || v === undefined) return null;
+  let s = String(v).trim();
+  if (s === '') return null;
+
+  // se contiene sia '.' che ',' => '.' migliaia, ',' decimali
+  if (s.includes('.') && s.includes(',')) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (s.includes(',')) {
+    // solo virgola => decimali
+    s = s.replace(',', '.');
+  } else if (s.includes('.')) {
+    // solo punto: se pattern tipo 1.500 o 12.000.000 => migliaia
+    if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    // altrimenti lo lascio come decimale (es. 12.5)
+  }
+
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 };
 
@@ -133,10 +149,10 @@ export default function App() {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
-  const [tick, setTick] = useState(0); // forza il re-render del timer
+  const [tick, setTick] = useState(0);
 
   // stile per far lampeggiare "Riprendi"
-  const [hasBlinkStyle] = useState(() => {
+  useEffect(() => {
     const id = 'blink-style';
     if (!document.getElementById(id)) {
       const el = document.createElement('style');
@@ -147,16 +163,13 @@ export default function App() {
           50% { transform: scale(1.03); filter: brightness(1.25); }
           100% { transform: scale(1); filter: brightness(1); }
         }
-        .blink {
-          animation: blinkPulse 1s ease-in-out infinite;
-        }
+        .blink { animation: blinkPulse 1s ease-in-out infinite; }
       `;
       document.head.appendChild(el);
     }
-    return true;
-  });
+  }, []);
 
-  // MODALS: stop / admin / nuovo ordine / note / avanzamento completati
+  // MODALS
   const [stopOpen, setStopOpen] = useState(false);
   const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
   const [stopOperator, setStopOperator] = useState<string>('');
@@ -182,13 +195,14 @@ export default function App() {
 
   const [advanceOpen, setAdvanceOpen] = useState(false);
   const [advanceTarget, setAdvanceTarget] = useState<OrderItem | null>(null);
-  const [advancePhase, setAdvancePhase] = useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
+  const [advancePhase, setAdvancePhase] =
+    useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
   const [advancePacked, setAdvancePacked] = useState<number>(0);
 
-  // CRUSCOTTO: filtro "Ordini dal ..."
+  // CRUSCOTTO: filtro "Ordini dal …"
   const [filterFrom, setFilterFrom] = useState<string>(''); // yyyy-mm-dd
 
-  // Load data
+  // carica dati
   useEffect(() => {
     (async () => {
       await ensureAnonAuth();
@@ -199,42 +213,54 @@ export default function App() {
     })();
   }, []);
 
-  // TICK del timer: gira solo se c'è almeno un timer running
+  // tick timer quando c’è almeno un running
   useEffect(() => {
-    const anyRunning = Object.values(timers).some(t => t.running);
+    const anyRunning = Object.values(timers).some((t) => t.running);
     if (!anyRunning) return;
-    const h = setInterval(() => setTick(t => t + 1), 1000);
+    const h = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(h);
   }, [timers]);
 
-  // Ordini filtrati dal "from"
-  const filteredOrders = useMemo(() => {
+  // helper date created_at
+  const createdAtMs = (o: any): number | null => {
+    const ca: any = o.created_at;
+    if (!ca) return null;
+    return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
+  };
+
+  // ordini filtrati per data (applicato ORA a TUTTE le liste)
+  const baseFiltered = useMemo(() => {
     if (!filterFrom) return orders;
-    const from = new Date(filterFrom + 'T00:00:00');
+    const from = new Date(filterFrom + 'T00:00:00').getTime();
     return orders.filter((o) => {
-      const ca: any = o.created_at;
-      const ts = ca?.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
-      if (!ts) return false;
-      return ts >= from.getTime();
+      const ts = createdAtMs(o);
+      return ts ? ts >= from : false;
     });
   }, [orders, filterFrom]);
 
-  // KPI cruscotto (sulla lista filtrata)
+  // visibili (non nascosti)
+  const visibleOrders = useMemo(
+    () => baseFiltered.filter((o: any) => !o.hidden),
+    [baseFiltered]
+  );
+
+  // KPI sul filtrato (inclusi eventualmente nascosti? meglio NO)
   const kpi = useMemo(() => {
-    const byStatus = (st: OrderItem['status']) => filteredOrders.filter((o) => o.status === st).length;
+    const byStatus = (st: OrderItem['status']) =>
+      visibleOrders.filter((o) => o.status === st).length;
     return {
       da_iniziare: byStatus('da_iniziare'),
       in_esecuzione: byStatus('in_esecuzione'),
       eseguiti: byStatus('eseguito'),
     };
-  }, [filteredOrders]);
+  }, [visibleOrders]);
 
-  // Oggi (pezzi e tempo)
+  // oggi (pezzi/tempo) su TUTTI (anche nascosti)
   const todayAgg = useMemo(() => {
     const { start, end } = getDayBounds(new Date());
     let pezzi = 0;
     let sec = 0;
-    orders.forEach((o: any) => {
+    baseFiltered.forEach((o: any) => {
       const ldt: any = o.last_done_at;
       const ms = ldt?.toMillis ? ldt.toMillis() : (typeof ldt === 'number' ? ldt : null);
       if (ms && ms >= start.getTime() && ms <= end.getTime()) {
@@ -243,7 +269,7 @@ export default function App() {
       }
     });
     return { pezziOggi: pezzi, secOggi: sec };
-  }, [orders]);
+  }, [baseFiltered]);
 
   /* ------------------- IMPORT ------------------- */
   const handleImportCSV = async (file: File) => {
@@ -273,17 +299,18 @@ export default function App() {
             order_number: String(order_number),
             customer: customer ? String(customer) : '',
             product_code: String(product_code),
-            ml: asNumber(mlVal ?? null),
-            qty_requested: asNumber(qty_requested ?? null),
-            qty_in_oven: asNumber(qty_in_oven ?? null),
+            ml: parseNumberIT(mlVal ?? null),                         // <<< numeri IT
+            qty_requested: parseNumberIT(qty_requested ?? null),       // <<<
+            qty_in_oven: parseNumberIT(qty_in_oven ?? null),           // <<<
             qty_done: 0,
-            steps_count: Number(asNumber(steps ?? 0)) || 0,
-            steps_progress: {},        // { [passaggio]: pezzi }
-            steps_time: {},            // { [passaggio]: secondi }
+            steps_count: Number(parseNumberIT(steps ?? 0)) || 0,       // <<<
+            steps_progress: {},
+            steps_time: {},
             packed_qty: 0,
             status: 'da_iniziare' as const,
             created_at: serverTimestamp(),
-            notes_log: [],             // storico note
+            notes_log: [],
+            hidden: false,                                            // <<<
           };
         })
         .filter(Boolean) as any[];
@@ -325,10 +352,7 @@ export default function App() {
     const extra = t.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
     const elapsed = (t.elapsed || 0) + extra;
 
-    setTimers((tt) => ({
-      ...tt,
-      [row.id!]: { running: false, startedAt: null, elapsed },
-    }));
+    setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed } }));
 
     await updateDoc(doc(db, 'order_items', row.id!), {
       status: 'pausato',
@@ -338,9 +362,7 @@ export default function App() {
 
     setOrders((prev) =>
       prev.map((o: any) =>
-        o.id === row.id
-          ? { ...o, status: 'pausato', elapsed_sec: elapsed, timer_start: null }
-          : o
+        o.id === row.id ? { ...o, status: 'pausato', elapsed_sec: elapsed, timer_start: null } : o
       ) as any
     );
   };
@@ -384,17 +406,14 @@ export default function App() {
     const pass = Number(stopStep || 0);
     if (!pass || pass < 1) { alert('Seleziona un passaggio valido'); return; }
 
-    // accumula tempo e pezzi sul passaggio scelto
     const nextStepsTime: Record<number, number> = { ...(row.steps_time || {}) };
     nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + spentSec;
 
     const nextStepsProg: Record<number, number> = { ...(row.steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
-    // qty finita (min tra i passaggi)
     const qtyDone = computeFullyDone(Number(row.steps_count || 0), nextStepsProg, 0);
 
-    // note log (append)
     const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
     if (stopNotes && stopNotes.trim()) {
       notesLog.push({
@@ -406,31 +425,25 @@ export default function App() {
       });
     }
 
-    // se finito tutto → eseguito
     const richiesta = Number(row.qty_requested || 0);
     const isCompleted = richiesta > 0 && qtyDone >= richiesta;
 
-    await setDoc(
-      doc(db, 'order_items', row.id!),
-      {
-        status: isCompleted ? 'eseguito' : 'da_iniziare',
-        elapsed_sec: 0,
-        timer_start: null,
-        last_done_at: serverTimestamp(),
-        steps_time: nextStepsTime,
-        steps_progress: nextStepsProg,
-        qty_done: qtyDone,
-        last_operator: stopOperator || null,
-        last_notes: stopNotes || null,
-        last_step: pass,
-        last_pieces: Number(stopPieces || 0),
-        last_duration_sec: spentSec,
-        notes_log: notesLog,
-      } as any,
-      { merge: true }
-    );
+    await setDoc(doc(db, 'order_items', row.id!), {
+      status: isCompleted ? 'eseguito' : 'da_iniziare',
+      elapsed_sec: 0,
+      timer_start: null,
+      last_done_at: serverTimestamp(),
+      steps_time: nextStepsTime,
+      steps_progress: nextStepsProg,
+      qty_done: qtyDone,
+      last_operator: stopOperator || null,
+      last_notes: stopNotes || null,
+      last_step: pass,
+      last_pieces: Number(stopPieces || 0),
+      last_duration_sec: spentSec,
+      notes_log: notesLog,
+    } as any, { merge: true });
 
-    // aggiorna UI locale
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
     setOrders((prev) =>
       prev.map((o: any) =>
@@ -458,7 +471,7 @@ export default function App() {
     setStopOpen(false);
   };
 
-  /* ------------------- ADMIN operators ------------------- */
+  /* ------------------- ADMIN operators + gestione righe ------------------- */
   const addOperator = async () => {
     const name = newOperatorName.trim();
     if (!name) return;
@@ -467,16 +480,25 @@ export default function App() {
     setOperators((prev) => [...prev, { id, name, active: true }]);
     setNewOperatorName('');
   };
-
   const toggleOperator = async (op: Operator) => {
     await updateDoc(doc(db, 'operators', op.id!), { active: !op.active } as any);
     setOperators((prev) => prev.map((o) => (o.id === op.id ? { ...o, active: !o.active } : o)));
   };
-
   const removeOperator = async (op: Operator) => {
     if (!op.id) return;
     await deleteDoc(doc(db, 'operators', op.id));
     setOperators((prev) => prev.filter((o) => o.id !== op.id));
+  };
+
+  // NASCONDI (soft delete) ordine: non si vede più a sinistra/destra, ma rimane per excel
+  const hideOrder = async (o: any) => {
+    await updateDoc(doc(db, 'order_items', o.id), { hidden: true, deleted_at: serverTimestamp() } as any);
+    setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, hidden: true, deleted_at: new Date() as any } : x)));
+  };
+  // RIPRISTINA ordine
+  const restoreOrder = async (o: any) => {
+    await updateDoc(doc(db, 'order_items', o.id), { hidden: false } as any);
+    setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, hidden: false } : x)));
   };
 
   /* ------------------- Inserisci Ordine ------------------- */
@@ -489,17 +511,18 @@ export default function App() {
       order_number,
       customer: newOrder.customer.trim(),
       product_code,
-      ml: asNumber(newOrder.ml),
-      qty_requested: asNumber(newOrder.qty_requested) ?? 0,
+      ml: parseNumberIT(newOrder.ml),
+      qty_requested: parseNumberIT(newOrder.qty_requested) ?? 0,
       qty_in_oven: 0,
       qty_done: 0,
-      steps_count: Number(newOrder.steps_count || 0),
+      steps_count: Number(parseNumberIT(newOrder.steps_count) || 0),
       steps_progress: {},
       steps_time: {},
       packed_qty: 0,
       status: 'da_iniziare' as const,
       created_at: serverTimestamp(),
       notes_log: [],
+      hidden: false,
     };
 
     const id = toDocId(row.order_number, row.product_code);
@@ -510,7 +533,7 @@ export default function App() {
     setNewOrder({ order_number: '', customer: '', product_code: '', ml: '' as any, qty_requested: '' as any, steps_count: 0 });
   };
 
-  /* ------------------- Avanzamento da "Completati" ------------------- */
+  /* ------------------- Avanzamento (completati) ------------------- */
   const openAdvance = (row: any) => {
     setAdvanceTarget(row);
     setAdvancePhase('in_essiccazione');
@@ -526,7 +549,6 @@ export default function App() {
       status_changed_at: serverTimestamp(),
     };
 
-    // Mostra input "Quanti pezzi imballati?" SOLO per PRONTI PER LA CONSEGNA (obbligatorio)
     if (advancePhase === 'pronti_consegna') {
       if (!advancePacked || advancePacked <= 0) {
         alert('Inserisci i pezzi imballati per passare a PRONTI PER LA CONSEGNA');
@@ -537,16 +559,17 @@ export default function App() {
 
     await updateDoc(doc(db, 'order_items', id), patch);
     setOrders((prev) =>
-      prev.map((o: any) =>
-        o.id === id ? { ...o, ...patch, status_changed_at: new Date() as any } : o
-      )
+      prev.map((o: any) => (o.id === id ? { ...o, ...patch, status_changed_at: new Date() as any } : o))
     );
     setAdvanceOpen(false);
   };
 
-  /* ------------------- EXPORT (solo sul cruscotto) ------------------- */
+  /* ------------------- EXPORT ------------------- */
   const exportExcel = () => {
-    const rows = filteredOrders.map((o: any) => {
+    // base per export = filtrati per data (anche se "hidden": li includo e li marco)
+    const exportBase = baseFiltered;
+
+    const rows = exportBase.map((o: any) => {
       const richiesta = Number(o.qty_requested ?? 0);
       const fatta = Number(o.qty_done ?? 0);
       const rimanente = Math.max(0, richiesta - fatta);
@@ -558,12 +581,12 @@ export default function App() {
         'Q.ta richiesta': richiesta,
         'Q.ta fatta': fatta,
         'Q.ta rimanente': rimanente,
-        Stato: o.status,
+        Stato: o.hidden ? 'CANCELLATO' : o.status,       // <<< si vede anche se nascosto
       };
     });
 
     const aggRows: Array<{ Ordine: any; Riga: string; Passaggio: number; Pezzi: number; Tempo: string }> = [];
-    filteredOrders.forEach((o: any, idx: number) => {
+    exportBase.forEach((o: any, idx: number) => {
       const stats = aggregateStepStats(o);
       stats.forEach((s) => {
         aggRows.push({
@@ -604,34 +627,34 @@ export default function App() {
     );
   };
 
-  // Lista “Completati” + fasi successive, con filtro 7 giorni per "pronti_consegna"
+  // completati + fasi (visibili, filtro 7gg su pronti)
   const completati = useMemo(() => {
     const now = Date.now();
     const week = 7 * 24 * 3600 * 1000;
-    return orders.filter((o: any) => {
-      const keep =
-        o.status === 'eseguito' ||
-        o.status === 'in_essiccazione' ||
-        o.status === 'in_imballaggio' ||
-        o.status === 'pronti_consegna';
-      if (!keep) return false;
-
-      if (o.status === 'pronti_consegna') {
-        const sca: any = o.status_changed_at;
-        const ts = sca?.toMillis ? sca.toMillis() : (typeof sca === 'number' ? sca : null);
-        if (ts && now - ts > week) return false; // nascondi se più vecchio di 7 giorni
-      }
-      return true;
-    });
-  }, [orders]);
+    return baseFiltered
+      .filter((o: any) => !o.hidden) // <<< non mostrare i nascosti
+      .filter((o: any) => {
+        const keep =
+          o.status === 'eseguito' ||
+          o.status === 'in_essiccazione' ||
+          o.status === 'in_imballaggio' ||
+          o.status === 'pronti_consegna';
+        if (!keep) return false;
+        if (o.status === 'pronti_consegna') {
+          const sca: any = o.status_changed_at;
+          const ts = sca?.toMillis ? sca.toMillis() : (typeof sca === 'number' ? sca : null);
+          if (ts && now - ts > week) return false;
+        }
+        return true;
+      });
+  }, [baseFiltered]);
 
   const badgeColor = (s: OrderItem['status']) => {
-    if (s === 'in_essiccazione') return '#b30d0d';     // rosso
-    if (s === 'in_imballaggio') return '#d87f1f';      // arancio
-    if (s === 'pronti_consegna') return '#168a3d';     // verde
-    return '#666';                                     // grigio (eseguito)
+    if (s === 'in_essiccazione') return '#b30d0d';
+    if (s === 'in_imballaggio') return '#d87f1f';
+    if (s === 'pronti_consegna') return '#168a3d';
+    return '#666';
   };
-
   const badgeLabel = (s: OrderItem['status']) => {
     if (s === 'in_essiccazione') return 'ESSICCAZIONE';
     if (s === 'in_imballaggio') return 'IMBALLAGGIO';
@@ -651,7 +674,7 @@ export default function App() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
-        {/* TABELLA ORDINI */}
+        {/* TABELLA ORDINI (FILTRATA + NON NASCOSTA) */}
         <div className="table-wrap">
           <table className="table" style={{ width: '100%' }}>
             <thead>
@@ -668,11 +691,10 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {orders.map((row: any) => {
+              {visibleOrders.map((row: any) => {
                 const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
                 const now = Date.now();
-                // uso tick per forzare il rerender ogni secondo quando ci sono timer running
-                const _ = tick; // eslint-disable-line @typescript-eslint/no-unused-vars
+                const _ = tick; // forza re-render durante il running
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
                 const richiesta = Number(row.qty_requested ?? 0);
@@ -706,17 +728,12 @@ export default function App() {
                           Start
                         </button>
 
-                        {/* Mostro il tasto Pausa SOLO mentre è in esecuzione */}
                         {row.status === 'in_esecuzione' && (
-                          <button
-                            className="btn btn-warning"
-                            onClick={() => onPause(row)}
-                          >
+                          <button className="btn btn-warning" onClick={() => onPause(row)}>
                             Pausa
                           </button>
                         )}
 
-                        {/* Riprendi lampeggia quando sono in pausa */}
                         <button
                           className={`btn btn-success ${row.status === 'pausato' ? 'blink' : ''}`}
                           disabled={row.status !== 'pausato'}
@@ -747,11 +764,7 @@ export default function App() {
           <div style={{ display: 'grid', gap: 8 }}>
             <label>
               <div>Ordini dal…</div>
-              <input
-                type="date"
-                value={filterFrom}
-                onChange={(e) => setFilterFrom(e.target.value)}
-              />
+              <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
             </label>
 
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
@@ -769,7 +782,7 @@ export default function App() {
               <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
             </div>
 
-            {/* elenco completati + fasi */}
+            {/* Completati + fasi */}
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Completati</div>
               <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
@@ -779,11 +792,7 @@ export default function App() {
                     key={o.id}
                     className="btn"
                     onClick={() => openAdvance(o as any)}
-                    style={{
-                      justifyContent: 'space-between',
-                      background: badgeColor(o.status),
-                      color: 'white'
-                    }}
+                    style={{ justifyContent: 'space-between', background: badgeColor(o.status), color: 'white' }}
                   >
                     <span>{o.order_number} · {o.product_code}</span>
                     <span style={{ opacity: 0.9, fontSize: 12 }}>{badgeLabel(o.status)}</span>
@@ -800,10 +809,7 @@ export default function App() {
         <div className="grid" style={{ display: 'grid', gap: 8 }}>
           <label>
             <div>Passaggio eseguito</div>
-            <select
-              value={stopStep}
-              onChange={(e) => setStopStep(Number(e.target.value))}
-            >
+            <select value={stopStep} onChange={(e) => setStopStep(Number(e.target.value))}>
               {Array.from({ length: Math.max(1, Math.min(10, Number(stopTarget?.steps_count || 10))) }).map((_, i) => (
                 <option key={i+1} value={i+1}>{i+1}</option>
               ))}
@@ -833,9 +839,7 @@ export default function App() {
       {/* NOTE MODAL */}
       <Modal open={notesOpen} onClose={() => setNotesOpen(false)} title="Note ordine">
         <div style={{ display: 'grid', gap: 8, maxHeight: 360, overflow: 'auto' }}>
-          {(!notesTarget?.notes_log || notesTarget.notes_log.length === 0) && (
-            <div>Nessuna nota.</div>
-          )}
+          {(!notesTarget?.notes_log || notesTarget.notes_log.length === 0) && <div>Nessuna nota.</div>}
           {(notesTarget?.notes_log ?? []).slice().reverse().map((n: any, idx: number) => (
             <div key={idx} style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.8 }}>
@@ -847,7 +851,7 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* AVANZA FASE (da completati) */}
+      {/* AVANZA FASE */}
       <Modal open={advanceOpen} onClose={() => setAdvanceOpen(false)} title="Avanza fase ordine completato">
         <div style={{ display: 'grid', gap: 8 }}>
           <div><strong>{advanceTarget?.order_number}</strong> · {advanceTarget?.product_code}</div>
@@ -860,7 +864,6 @@ export default function App() {
             </select>
           </label>
 
-          {/* input imballati solo per PRONTI PER LA CONSEGNA */}
           {advancePhase === 'pronti_consegna' && (
             <label>
               <div>Quanti pezzi imballati?</div>
@@ -879,30 +882,56 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* ADMIN MODAL */}
-      <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori">
-        <div style={{ display: 'grid', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              placeholder="Nuovo operatore"
-              value={newOperatorName}
-              onChange={(e) => setNewOperatorName(e.target.value)}
-            />
-            <button className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
+      {/* ADMIN MODAL (operatori + gestione ordini) */}
+      <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori & Ordini">
+        <div style={{ display: 'grid', gap: 16 }}>
+          {/* Operatori */}
+          <div>
+            <h4 style={{ margin: '0 0 8px' }}>Operatori</h4>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                placeholder="Nuovo operatore"
+                value={newOperatorName}
+                onChange={(e) => setNewOperatorName(e.target.value)}
+              />
+              <button className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
+            </div>
+            <div style={{ maxHeight: 200, overflow: 'auto', borderTop: '1px solid #eee', marginTop: 8, paddingTop: 8 }}>
+              {operators.map((op) => (
+                <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                  <div style={{ flex: 1 }}>{op.name} {op.active ? '' : <span style={{ color: '#a00' }}>(disattivo)</span>}</div>
+                  <button className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
+                  <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ maxHeight: 240, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8 }}>
-            {operators.map((op) => (
-              <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                <div style={{ flex: 1 }}>{op.name} {op.active ? '' : <span style={{ color: '#a00' }}>(disattivo)</span>}</div>
-                <button className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
-                <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
-              </div>
-            ))}
+
+          {/* Ordini: nascondi/ripristina */}
+          <div>
+            <h4 style={{ margin: '0 0 8px' }}>Ordini (nascondi / ripristina)</h4>
+            <div style={{ maxHeight: 300, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8 }}>
+              {baseFiltered.map((o: any) => (
+                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                  <div style={{ flex: 1, opacity: o.hidden ? 0.6 : 1 }}>
+                    {o.order_number} · {o.product_code} — <em>{o.hidden ? 'CANCELLATO' : o.status}</em>
+                  </div>
+                  {!o.hidden ? (
+                    <button className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
+                  ) : (
+                    <button className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
+              Gli ordini nascosti non compaiono in schermata, ma saranno comunque presenti nello SCARICO EXCEL (Stato: CANCELLATO).
+            </div>
           </div>
         </div>
       </Modal>
 
-      {/* INSERISCI ORDINE MODAL */}
+      {/* INSERISCI ORDINE */}
       <Modal open={newOrderOpen} onClose={() => setNewOrderOpen(false)} title="Inserisci Ordine">
         <div style={{ display: 'grid', gap: 8 }}>
           <label>
