@@ -4,13 +4,12 @@ export type Operator = {
   active: boolean;
 };
 
-/** Singola nota salvata nello storico note dell'ordine */
 export type OrderNote = {
-  ts: string;               // ISO date es. 2025-10-28T09:15:00.000Z
-  operator: string | null;  // nome operatore (opzionale)
-  text: string;             // testo nota
-  step?: number;            // passaggio a cui si riferisce (opzionale)
-  pieces?: number;          // pezzi registrati nello stop (opzionale)
+  ts: string;
+  operator: string | null;
+  text: string;
+  step?: number;
+  pieces?: number;
 };
 
 export type OrderItem = {
@@ -23,18 +22,18 @@ export type OrderItem = {
 
   // Dati opzionali
   ml?: number | null;
-  qty_requested?: number | null;      // quantità richiesta per riga
+  qty_requested?: number | null;
   qty_in_oven?: number | null;
 
   // Progressi per passaggio
-  steps_count: number;                     // es. 1..10
-  steps_progress?: Record<number, number>; // { passaggio: pezzi }
-  steps_time?: Record<number, number>;     // { passaggio: secondi }
+  steps_count: number;
+  steps_progress?: Record<number, number>;
+  steps_time?: Record<number, number>;
 
   // Pezzi completamente finiti (min tra i passaggi)
   qty_done?: number | null;
 
-  // Stato lavorazione riga (include 'pausato' come richiesto)
+  // Stato lavorazione riga
   status:
     | 'da_iniziare'
     | 'in_esecuzione'
@@ -45,37 +44,24 @@ export type OrderItem = {
     | 'pronti_consegna';
 
   // Timer/state salvati su Firestore
-  elapsed_sec?: number | null;        // secondi accumulati quando NON sta girando
-  timer_start?: number | null;        // epoch ms quando parte l'ultimo giro del timer
+  elapsed_sec?: number | null;
+  timer_start?: number | null;
 
-  // Ultimo STOP registrato (per KPI e report)
+  // Ultimo STOP registrato
   last_operator?: string | null;
   last_notes?: string | null;
   last_step?: number | null;
   last_pieces?: number | null;
-  last_duration_sec?: number | null;  // <— tempo (in secondi) dell’ultimo stop, usato per “tempo eseguito oggi”
+  last_duration_sec?: number | null;
 
-  // Storico note per “Vedi note”
-  notes_log?: OrderNote[];            // <— storico note
+  // Storico note
+  notes_log?: OrderNote[];
 
-  // Imballaggio (opzionale)
+  // Imballaggio
   packed_qty?: number | null;
 
   // Timestamps Firestore
-  created_at?: any;                   // serverTimestamp
-  last_done_at?: any;                 // serverTimestamp
-};
-
-/** (facoltativo) Se vuoi mantenere i log separati */
-export type OrderLog = {
-  id?: string;
-  order_item_id: string;
-  operator_name: string;
-  step_number: number;
-  pieces_done: number;
-  notes?: string | null;
-  started_at?: string | null;
-  stopped_at?: string | null;
-  duration_seconds?: number | null;
-  created_at?: string;
+  created_at?: any;
+  last_done_at?: any;
+  status_changed_at?: any; // <— NUOVO: quando passo a essiccazione/imballaggio/pronti
 };
