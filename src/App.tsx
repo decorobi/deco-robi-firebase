@@ -181,7 +181,7 @@ export default function App() {
     order_number: '',
     customer: '',
     product_code: '',
-    description: '',       // <-- nuovo campo
+    description: '',
     ml: '' as any,
     qty_requested: '' as any,
     steps_count: 0,
@@ -223,7 +223,7 @@ export default function App() {
     const ca: any = o.created_at;
     if (!ca) return null;
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
-  };
+    };
 
   // ordini filtrati per data
   const baseFiltered = useMemo(() => {
@@ -287,7 +287,7 @@ export default function App() {
           const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
           const customer = pick(r, ['cliente']);
           const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod']);
-          const description = pick(r, ['descrizione', 'descr', 'descrizione prodotto', 'desc', 'descr.']); // <-- descrizione dal CSV
+          const description = pick(r, ['descrizione', 'descr', 'descrizione prodotto', 'desc', 'descr.']);
           const mlVal = pick(r, ['ml']);
           const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta']);
           const qty_in_oven = pick(r, ['inforno', 'in forno']);
@@ -297,7 +297,7 @@ export default function App() {
             order_number: String(order_number),
             customer: customer ? String(customer) : '',
             product_code: String(product_code),
-            description: description ? String(description) : '',   // <-- salvo la descrizione
+            description: description ? String(description) : '',
             ml: parseNumberIT(mlVal ?? null),
             qty_requested: parseNumberIT(qty_requested ?? null),
             qty_in_oven: parseNumberIT(qty_in_oven ?? null),
@@ -535,7 +535,7 @@ export default function App() {
       order_number,
       customer: newOrder.customer.trim(),
       product_code,
-      description: newOrder.description.trim(),  // <-- salva descrizione
+      description: newOrder.description.trim(),
       ml: parseNumberIT(newOrder.ml),
       qty_requested: parseNumberIT(newOrder.qty_requested) ?? 0,
       qty_in_oven: 0,
@@ -606,7 +606,7 @@ export default function App() {
         Ordine: o.order_number,
         Cliente: o.customer || '',
         Codice: o.product_code,
-        Descrizione: (o as any).description || '',    // <-- descrizione in export
+        Descrizione: (o as any).description || '',
         ML: o.ml ?? '',
         'Q.ta richiesta': richiesta,
         'Q.ta fatta': fatta,
@@ -680,12 +680,13 @@ export default function App() {
       });
   }, [baseFiltered]);
 
+  // >>> COLORI/ETICHETTE AGGIORNATI
   const badgeColor = (s: OrderItem['status'], qtyDone?: number) => {
-    if (s === 'in_essiccazione') return '#b30d0d';
-    if (s === 'in_imballaggio') return '#d87f1f';
-    if (s === 'pronti_consegna') return '#168a3d';
-    if (s === 'eseguito') return '#168a3d';
-    if ((qtyDone ?? 0) > 0) return '#555'; // parziale
+    if (s === 'in_essiccazione') return '#168a3d'; // VERDE
+    if (s === 'in_imballaggio') return '#d87f1f'; // ARANCIO
+    if (s === 'pronti_consegna') return '#168a3d'; // VERDE
+    if (s === 'eseguito') return '#555';           // GRIGIO (completato)
+    if ((qtyDone ?? 0) > 0) return '#555';         // parziale
     return '#666';
   };
   const badgeLabel = (s: OrderItem['status'], qtyDone?: number) => {
@@ -717,7 +718,7 @@ export default function App() {
                 <th>Ordine</th>
                 <th>Cliente</th>
                 <th>Codice</th>
-                <th>Descrizione</th>{/* <-- nuova colonna */}
+                <th>Descrizione</th>
                 <th>Q.ta rich.</th>
                 <th>Q.ta fatta</th>
                 <th>Rimanenti</th>
@@ -769,7 +770,7 @@ export default function App() {
                       )}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                         <button
                           className="btn btn-primary"
                           disabled={row.status !== 'da_iniziare'}
@@ -795,8 +796,13 @@ export default function App() {
                         <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
 
                         {((row as any).notes_log && (row as any).notes_log.length > 0) && (
-                          <button className="btn" onClick={() => { setNotesTarget(row); setNotesOpen(true); }}>
-                            Vedi note
+                          <button
+                            className="btn"
+                            onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
+                            style={{ padding: '4px 8px', fontSize: 12 }}   // <<-- pulsante piccolo
+                            title="Vedi note"
+                          >
+                            Note
                           </button>
                         )}
                       </div>
@@ -808,7 +814,7 @@ export default function App() {
           </table>
         </div>
 
-        {/* CRUSCOTTO OPERATIVO (ristretto) */}
+        {/* CRUSCOTTO OPERATIVO */}
         <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
           <h3 style={{ marginTop: 0 }}>CRUSCOTTO OPERATIVO</h3>
           <div style={{ display: 'grid', gap: 8 }}>
