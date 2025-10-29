@@ -230,21 +230,21 @@ export default function App() {
     if (!filterFrom) return orders;
     const from = new Date(filterFrom + 'T00:00:00').getTime();
     return orders.filter((o) => {
-      const ts = createdAtMs(o);
+      const ts = createdAtMs(o as any);
       return ts ? ts >= from : false;
     });
   }, [orders, filterFrom]);
 
   // visibili (non nascosti) **ESCLUSI** quelli completamente eseguiti → spariscono dalla sinistra
   const visibleOrders = useMemo(
-    () => baseFiltered.filter((o: any) => !o.hidden && o.status !== 'eseguito'),
+    () => baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status !== 'eseguito'),
     [baseFiltered]
   );
 
-  // KPI sul filtrato visibile
+  // KPI sul filtrato (considera tutti i non nascosti)
   const kpi = useMemo(() => {
-    const byStatus = (st: OrderItem['status']) =>
-      baseFiltered.filter((o) => !o.hidden && o.status === st).length;
+    const byStatus = (st: any) =>
+      baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status === st).length;
     return {
       da_iniziare: byStatus('da_iniziare'),
       in_esecuzione: byStatus('in_esecuzione'),
@@ -258,10 +258,10 @@ export default function App() {
     let pezzi = 0;
     let sec = 0;
     baseFiltered.forEach((o: any) => {
-      const ldt: any = o.last_done_at;
+      const ldt: any = (o as any).last_done_at;
       const ms = ldt?.toMillis ? ldt.toMillis() : (typeof ldt === 'number' ? ldt : null);
       if (ms && ms >= start.getTime() && ms <= end.getTime()) {
-        pezzi += Number(o.last_pieces || 0);
+        pezzi += Number((o as any).last_pieces || 0);
         sec += Number((o as any).last_duration_sec || 0);
       }
     });
@@ -332,7 +332,7 @@ export default function App() {
   const onStart = async (row: any) => {
     setTimers((t) => ({
       ...t,
-      [row.id!]: { running: true, startedAt: Date.now(), elapsed: Number(row.elapsed_sec || 0) },
+      [row.id!]: { running: true, startedAt: Date.now(), elapsed: Number((row as any).elapsed_sec || 0) },
     }));
     await updateDoc(doc(db, 'order_items', row.id!), {
       status: 'in_esecuzione',
@@ -346,7 +346,7 @@ export default function App() {
   };
 
   const onPause = async (row: any) => {
-    const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
+    const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number((row as any).elapsed_sec || 0) };
     const now = Date.now();
     const extra = t.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
     const elapsed = (t.elapsed || 0) + extra;
@@ -367,7 +367,7 @@ export default function App() {
   };
 
   const onResume = async (row: any) => {
-    const prevElapsed = Number(timers[row.id!]?.elapsed ?? row.elapsed_sec ?? 0);
+    const prevElapsed = Number(timers[row.id!]?.elapsed ?? (row as any).elapsed_sec ?? 0);
     setTimers((t) => ({
       ...t,
       [row.id!]: { running: true, startedAt: Date.now(), elapsed: prevElapsed },
@@ -399,7 +399,7 @@ export default function App() {
     const row: any = stopTarget;
 
     // VALIDAZIONE OBBLIGATORIA
-    const stepsCount = Number(row.steps_count || 0);
+    const stepsCount = Number((row as any).steps_count || 0);
     if (!stopStep || stopStep < 1 || (stepsCount > 0 && stopStep > stepsCount)) {
       alert('Seleziona un passaggio valido.');
       return;
@@ -421,14 +421,14 @@ export default function App() {
     const pass = Number(stopStep || 0);
 
     // accumula tempo e pezzi sul passaggio scelto
-    const nextStepsTime: Record<number, number> = { ...(row.steps_time || {}) };
+    const nextStepsTime: Record<number, number> = { ...((row as any).steps_time || {}) };
     nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + spentSec;
 
-    const nextStepsProg: Record<number, number> = { ...(row.steps_progress || {}) };
+    const nextStepsProg: Record<number, number> = { ...((row as any).steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
     // qty finita (min tra i passaggi)
-    const qtyDone = computeFullyDone(Number(row.steps_count || 0), nextStepsProg, 0);
+    const qtyDone = computeFullyDone(Number((row as any).steps_count || 0), nextStepsProg, 0);
 
     // note log (append)
     const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
@@ -443,7 +443,7 @@ export default function App() {
     }
 
     // completamento totale solo se raggiungo la richiesta su TUTTI i passaggi
-    const richiesta = Number(row.qty_requested || 0);
+    const richiesta = Number((row as any).qty_requested || 0);
     const isCompletedTot = richiesta > 0 && qtyDone >= richiesta;
 
     await setDoc(
@@ -500,17 +500,17 @@ export default function App() {
     if (!name) return;
     const id = name.toLowerCase().replace(/\s+/g, '_');
     await setDoc(doc(db, 'operators', id), { name, active: true });
-    setOperators((prev) => [...prev, { id, name, active: true }]);
+    setOperators((prev) => [...prev, { id, name, active: true } as any]);
     setNewOperatorName('');
   };
   const toggleOperator = async (op: Operator) => {
-    await updateDoc(doc(db, 'operators', op.id!), { active: !op.active } as any);
-    setOperators((prev) => prev.map((o) => (o.id === op.id ? { ...o, active: !o.active } : o)));
+    await updateDoc(doc(db, 'operators', (op as any).id!), { active: !(op as any).active } as any);
+    setOperators((prev) => prev.map((o: any) => (o.id === (op as any).id ? { ...o, active: !o.active } : o)));
   };
   const removeOperator = async (op: Operator) => {
-    if (!op.id) return;
-    await deleteDoc(doc(db, 'operators', op.id));
-    setOperators((prev) => prev.filter((o) => o.id !== op.id));
+    if (!(op as any).id) return;
+    await deleteDoc(doc(db, 'operators', (op as any).id));
+    setOperators((prev) => prev.filter((o: any) => o.id !== (op as any).id));
   };
 
   // NASCONDI (soft delete) ordine
@@ -530,7 +530,7 @@ export default function App() {
     const product_code = newOrder.product_code.trim();
     if (!order_number || !product_code) { alert('Ordine e Codice sono obbligatori'); return; }
 
-    const row = {
+    const row: any = {
       order_number,
       customer: newOrder.customer.trim(),
       product_code,
@@ -543,7 +543,7 @@ export default function App() {
       steps_progress: {},
       steps_time: {},
       packed_qty: 0,
-      status: 'da_iniziare' as const,
+      status: 'da_iniziare',
       created_at: serverTimestamp(),
       hidden: false,
       notes_log: [],
@@ -575,7 +575,7 @@ export default function App() {
 
   const confirmAdvance = async () => {
     if (!advanceTarget) return;
-    const id = advanceTarget.id!;
+    const id = (advanceTarget as any).id!;
     const patch: any = { status: advancePhase, status_changed_at: serverTimestamp() };
 
     if (advancePhase === 'pronti_consegna') {
@@ -598,19 +598,19 @@ export default function App() {
     const exportBase = baseFiltered;
 
     const rows = exportBase.map((o: any) => {
-      const richiesta = Number(o.qty_requested ?? 0);
-      const fatta = Number(o.qty_done ?? 0);
+      const richiesta = Number((o as any).qty_requested ?? 0);
+      const fatta = Number((o as any).qty_done ?? 0);
       const rimanente = Math.max(0, richiesta - fatta);
       return {
-        Ordine: o.order_number,
-        Cliente: o.customer || '',
-        Codice: o.product_code,
+        Ordine: (o as any).order_number,
+        Cliente: (o as any).customer || '',
+        Codice: (o as any).product_code,
         Descrizione: (o as any).description || '',
-        ML: o.ml ?? '',
+        ML: (o as any).ml ?? '',
         'Q.ta richiesta': richiesta,
         'Q.ta fatta': fatta,
         'Q.ta rimanente': rimanente,
-        Stato: o.hidden ? 'CANCELLATO' : o.status,
+        Stato: (o as any).hidden ? 'CANCELLATO' : (o as any).status,
       };
     });
 
@@ -619,8 +619,8 @@ export default function App() {
       const stats = aggregateStepStats(o);
       stats.forEach((s) => {
         aggRows.push({
-          Ordine: o.order_number,
-          Riga: String(o.product_code || idx + 1),
+          Ordine: (o as any).order_number,
+          Riga: String((o as any).product_code || idx + 1),
           Passaggio: s.step,
           Pezzi: s.pieces || 0,
           Tempo: secToHMS(s.timeSec || 0),
@@ -644,7 +644,7 @@ export default function App() {
   const renderPassaggiCell = (row: any) => {
     const stats = aggregateStepStats(row);
     if (!stats.length) return <>—</>;
-    const richiesta = Number(row.qty_requested || 0) || Infinity;
+    const richiesta = Number((row as any).qty_requested || 0) || Infinity;
     return (
       <div style={{ display: 'grid', gap: 2 }}>
         {stats.map((s) => {
@@ -666,17 +666,18 @@ export default function App() {
     const now = Date.now();
     const week = 7 * 24 * 3600 * 1000;
     return baseFiltered
-      .filter((o: any) => !o.hidden)
+      .filter((o: any) => !((o as any).hidden))
       .filter((o: any) => {
+        const status = (o as any).status;
         const inRightPhase =
-          o.status === 'eseguito' ||
-          o.status === 'in_essiccazione' ||
-          o.status === 'in_imballaggio' ||
-          o.status === 'pronti_consegna';
-        const parziale = Number(o.qty_done || 0) > 0;
+          status === 'eseguito' ||
+          status === 'in_essiccazione' ||
+          status === 'in_imballaggio' ||
+          status === 'pronti_consegna';
+        const parziale = Number((o as any).qty_done || 0) > 0;
 
-        if (o.status === 'pronti_consegna') {
-          const sca: any = o.status_changed_at;
+        if (status === 'pronti_consegna') {
+          const sca: any = (o as any).status_changed_at;
           const ts = sca?.toMillis ? sca.toMillis() : (typeof sca === 'number' ? sca : null);
           if (ts && now - ts > week) return false;
         }
@@ -685,7 +686,7 @@ export default function App() {
   }, [baseFiltered]);
 
   // colori etichette per badge completati
-  const badgeColor = (s: OrderItem['status'], qtyDone?: number) => {
+  const badgeColor = (s: any, qtyDone?: number) => {
     if (s === 'in_essiccazione') return '#168a3d'; // VERDE
     if (s === 'in_imballaggio') return '#d87f1f'; // ARANCIO
     if (s === 'pronti_consegna') return '#168a3d'; // VERDE
@@ -693,7 +694,7 @@ export default function App() {
     if ((qtyDone ?? 0) > 0) return '#555';         // PARZIALE → grigio
     return '#666';
   };
-  const badgeLabel = (s: OrderItem['status'], qtyDone?: number) => {
+  const badgeLabel = (s: any, qtyDone?: number) => {
     if (s === 'in_essiccazione') return 'ESSICCAZIONE';
     if (s === 'in_imballaggio') return 'IMBALLAGGIO';
     if (s === 'pronti_consegna') return 'PRONTI';
@@ -706,7 +707,7 @@ export default function App() {
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* Top bar compatta */}
+      {/* Top bar compatta + CRUSCOTTO */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <div style={{ maxWidth: 320, width: '100%' }}>
           <input
@@ -719,7 +720,6 @@ export default function App() {
         <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
         <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
 
-        {/* CRUSCOTTO compatto, sta in alto a destra della top bar */}
         <div style={{
           marginLeft: 'auto',
           border: '1px solid #2b2f3a',
@@ -773,22 +773,22 @@ export default function App() {
             </thead>
             <tbody>
               {visibleOrders.map((row: any) => {
-                const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
+                const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number((row as any).elapsed_sec || 0) };
                 const now = Date.now();
                 const _ = tick; // re-render quando running
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
-                const richiesta = Number(row.qty_requested ?? 0);
-                const fatta = Number(row.qty_done ?? 0);
+                const richiesta = Number((row as any).qty_requested ?? 0);
+                const fatta = Number((row as any).qty_done ?? 0);
                 const rimanente = Math.max(0, richiesta - fatta);
 
                 const hasNotes = Array.isArray((row as any).notes_log) && (row as any).notes_log.length > 0;
 
                 return (
                   <tr key={row.id}>
-                    <td><strong>{row.order_number}</strong></td>
-                    <td>{row.customer || ''}</td>
-                    <td>{row.product_code}</td>
+                    <td><strong>{(row as any).order_number}</strong></td>
+                    <td>{(row as any).customer || ''}</td>
+                    <td>{(row as any).product_code}</td>
                     <td>
                       <div
                         title={(row as any).description || ''}
@@ -809,7 +809,7 @@ export default function App() {
                     <td>{renderPassaggiCell(row)}</td>
                     <td>
                       <span style={{ fontVariantNumeric: 'tabular-nums' }}>{secToHMS(elapsed)}</span>
-                      {row.status === 'pausato' && (
+                      {(row as any).status === 'pausato' && (
                         <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 6, background: '#666', color: 'white' }}>
                           Pausa
                         </span>
@@ -819,21 +819,21 @@ export default function App() {
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                         <button
                           className="btn btn-primary"
-                          disabled={row.status !== 'da_iniziare'}
+                          disabled={(row as any).status !== 'da_iniziare'}
                           onClick={() => onStart(row)}
                         >
                           Start
                         </button>
 
-                        {row.status === 'in_esecuzione' && (
+                        {(row as any).status === 'in_esecuzione' && (
                           <button className="btn btn-warning" onClick={() => onPause(row)}>
                             Pausa
                           </button>
                         )}
 
                         <button
-                          className={`btn btn-success ${row.status === 'pausato' ? 'blink' : ''}`}
-                          disabled={row.status !== 'pausato'}
+                          className={`btn btn-success ${(row as any).status === 'pausato' ? 'blink' : ''}`}
+                          disabled={(row as any).status !== 'pausato'}
                           onClick={() => onResume(row)}
                         >
                           Riprendi
@@ -841,7 +841,7 @@ export default function App() {
 
                         <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
 
-                        {/* NOTE: sempre visibile. Se non ci sono note è neutro */}
+                        {/* NOTE: sempre visibile */}
                         <button
                           className="btn"
                           onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
@@ -871,25 +871,25 @@ export default function App() {
           </div>
           <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
             {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
-            {completati.map((o) => (
+            {completati.map((o: any) => (
               <button
                 key={(o as any).id}
                 className="btn"
                 onClick={() => openAdvance(o as any)}
                 style={{
                   justifyContent: 'space-between',
-                  background: badgeColor(o.status, (o as any).qty_done as any),
+                  background: badgeColor((o as any).status, (o as any).qty_done as any),
                   color: 'white',
                   padding: '6px 10px'
                 }}
                 title={(o as any).description || ''}
               >
                 <span style={{ textAlign: 'left', fontSize: 13 }}>
-                  {o.order_number} · {o.product_code}
+                  {(o as any).order_number} · {(o as any).product_code}
                 </span>
                 <span style={{ opacity: 0.9, fontSize: 12 }}>
-                  {badgeLabel(o.status, (o as any).qty_done as any)}{' '}
-                  {(o as any).qty_done ? `(${(o as any).qty_done}/${o.qty_requested})` : ''}
+                  {badgeLabel((o as any).status, (o as any).qty_done as any)}{' '}
+                  {(o as any).qty_done ? `(${(o as any).qty_done}/${(o as any).qty_requested})` : ''}
                 </span>
               </button>
             ))}
@@ -904,9 +904,9 @@ export default function App() {
           display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,
           background:'#10151c',border:'1px solid #223',borderRadius:8,padding:8,marginBottom:8
         }}>
-          <div><div style={{opacity:.7,fontSize:12}}>N. Ordine</div><strong>{stopTarget?.order_number}</strong></div>
-          <div><div style={{opacity:.7,fontSize:12}}>Q.ta richiesta</div><strong>{Number(stopTarget?.qty_requested||0)}</strong></div>
-          <div><div style={{opacity:.7,fontSize:12}}>Q.ta fatta</div><strong>{Number(stopTarget?.qty_done||0)}</strong></div>
+          <div><div style={{opacity:.7,fontSize:12}}>N. Ordine</div><strong>{(stopTarget as any)?.order_number}</strong></div>
+          <div><div style={{opacity:.7,fontSize:12}}>Q.ta richiesta</div><strong>{Number((stopTarget as any)?.qty_requested||0)}</strong></div>
+          <div><div style={{opacity:.7,fontSize:12}}>Q.ta fatta</div><strong>{Number((stopTarget as any)?.qty_done||0)}</strong></div>
         </div>
 
         <div className="grid" style={{ display: 'grid', gap: 8 }}>
@@ -917,7 +917,7 @@ export default function App() {
               onChange={(e) => setStopStep(Number(e.target.value))}
               required
             >
-              {Array.from({ length: Math.max(1, Math.min(10, Number(stopTarget?.steps_count || 10))) }).map((_, i) => (
+              {Array.from({ length: Math.max(1, Math.min(10, Number((stopTarget as any)?.steps_count || 10))) }).map((_, i) => (
                 <option key={i+1} value={i+1}>{i+1}</option>
               ))}
             </select>
@@ -941,7 +941,7 @@ export default function App() {
               required
             >
               <option value="">— seleziona —</option>
-              {operators.map((op) => (<option key={op.id} value={(op as any).name}>{(op as any).name}</option>))}
+              {operators.map((op: any) => (<option key={op.id} value={op.name}>{op.name}</option>))}
             </select>
           </label>
           <label>
@@ -957,8 +957,8 @@ export default function App() {
       {/* NOTE MODAL */}
       <Modal open={notesOpen} onClose={() => setNotesOpen(false)} title="Note ordine">
         <div style={{ display: 'grid', gap: 8, maxHeight: 360, overflow: 'auto' }}>
-          {(!(notesTarget as any)?.notes_log || (notesTarget as any).notes_log.length === 0) && <div>Nessuna nota.</div>}
-          {((notesTarget as any)?.notes_log ?? []).slice().reverse().map((n: any, idx: number) => (
+          {(!((notesTarget as any)?.notes_log) || (notesTarget as any).notes_log.length === 0) && <div>Nessuna nota.</div>}
+          {(((notesTarget as any)?.notes_log) ?? []).slice().reverse().map((n: any, idx: number) => (
             <div key={idx} style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.8 }}>
                 {new Date(n.ts).toLocaleString()} • {n.operator || '—'} • Pass. {n.step} • {n.pieces} pz
@@ -972,7 +972,7 @@ export default function App() {
       {/* AVANZA FASE */}
       <Modal open={advanceOpen} onClose={() => setAdvanceOpen(false)} title="Avanza fase ordine completato">
         <div style={{ display: 'grid', gap: 8 }}>
-          <div><strong>{advanceTarget?.order_number}</strong> · {advanceTarget?.product_code}</div>
+          <div><strong>{(advanceTarget as any)?.order_number}</strong> · {(advanceTarget as any)?.product_code}</div>
           <label>
             <div>Quale passaggio vuoi eseguire ora?</div>
             <select value={advancePhase} onChange={(e) => setAdvancePhase(e.target.value as any)}>
@@ -1015,7 +1015,7 @@ export default function App() {
               <button className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
             </div>
             <div style={{ maxHeight: 200, overflow: 'auto', borderTop: '1px solid #eee', marginTop: 8, paddingTop: 8 }}>
-              {operators.map((op) => (
+              {operators.map((op: any) => (
                 <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
                   <div style={{ flex: 1 }}>{op.name} {op.active ? '' : <span style={{ color: '#a00' }}>(disattivo)</span>}</div>
                   <button className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
@@ -1031,10 +1031,10 @@ export default function App() {
             <div style={{ maxHeight: 300, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8 }}>
               {baseFiltered.map((o: any) => (
                 <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                  <div style={{ flex: 1, opacity: o.hidden ? 0.6 : 1 }}>
-                    {o.order_number} · {o.product_code} — <em>{o.hidden ? 'CANCELLATO' : o.status}</em>
+                  <div style={{ flex: 1, opacity: (o as any).hidden ? 0.6 : 1 }}>
+                    {(o as any).order_number} · {(o as any).product_code} — <em>{(o as any).hidden ? 'CANCELLATO' : (o as any).status}</em>
                   </div>
-                  {!o.hidden ? (
+                  {!(o as any).hidden ? (
                     <button className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
                   ) : (
                     <button className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
