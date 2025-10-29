@@ -19,7 +19,7 @@ import {
 
 type RowIn = Record<string, any>;
 
-/** Parsing “italiano”: 1.500 -> 1500, 1,5 -> 1.5, 1.500,25 -> 1500.25 */
+/** Parsing italiano: 1.500 -> 1500, 1,5 -> 1.5, 1.500,25 -> 1500.25 */
 const parseNumberIT = (v: any): number | null => {
   if (v === null || v === undefined) return null;
   let s = String(v).trim();
@@ -235,13 +235,23 @@ export default function App() {
     });
   }, [orders, filterFrom]);
 
-  // visibili (non nascosti)
+  // visibili a sinistra (solo NON in fasi di destra e NON parziali)
   const visibleOrders = useMemo(
-    () => baseFiltered.filter((o: any) => !o.hidden),
+    () =>
+      baseFiltered.filter((o: any) => {
+        if (o.hidden) return false;
+        const isRight =
+          o.status === 'eseguito' ||
+          o.status === 'in_essiccazione' ||
+          o.status === 'in_imballaggio' ||
+          o.status === 'pronti_consegna';
+        const parziale = Number(o.qty_done || 0) > 0;
+        return !isRight && !parziale;
+      }),
     [baseFiltered]
   );
 
-  // KPI sul filtrato visibile
+  // KPI sul filtrato VISIBILE
   const kpi = useMemo(() => {
     const byStatus = (st: OrderItem['status']) =>
       visibleOrders.filter((o) => o.status === st).length;
@@ -633,6 +643,47 @@ export default function App() {
     XLSX.writeFile(wb, `deco-riepilogo-${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
+  /* ------------------- Completati / Colori ------------------- */
+
+  const completati = useMemo(() => {
+    const now = Date.now();
+    const week = 7 * 24 * 3600 * 1000;
+    return baseFiltered
+      .filter((o: any) => !o.hidden)
+      .filter((o: any) => {
+        const inRight =
+          o.status === 'eseguito' ||
+          o.status === 'in_essiccazione' ||
+          o.status === 'in_imballaggio' ||
+          o.status === 'pronti_consegna';
+        const parziale = Number(o.qty_done || 0) > 0;
+
+        if (o.status === 'pronti_consegna') {
+          const sca: any = o.status_changed_at;
+          const ts = sca?.toMillis ? sca.toMillis() : (typeof sca === 'number' ? sca : null);
+          if (ts && now - ts > week) return false;
+        }
+        return inRight || parziale;
+      });
+  }, [baseFiltered]);
+
+  const badgeColor = (s: OrderItem['status'], qtyDone?: number) => {
+    if (s === 'in_essiccazione') return '#168a3d'; // VERDE
+    if (s === 'in_imballaggio') return '#d87f1f'; // ARANCIO
+    if (s === 'pronti_consegna') return '#168a3d'; // VERDE
+    if (s === 'eseguito') return '#555';           // GRIGIO
+    if ((qtyDone ?? 0) > 0) return '#555';         // PARZIALE → grigio
+    return '#666';
+  };
+  const badgeLabel = (s: OrderItem['status'], qtyDone?: number) => {
+    if (s === 'in_essiccazione') return 'ESSICCAZIONE';
+    if (s === 'in_imballaggio') return 'IMBALLAGGIO';
+    if (s === 'pronti_consegna') return 'PRONTI';
+    if (s === 'eseguito') return 'COMPLETATO';
+    if ((qtyDone ?? 0) > 0) return 'PARZIALE';
+    return 'COMPLETATO';
+  };
+
   /* ------------------- Render ------------------- */
 
   const renderPassaggiCell = (row: any) => {
@@ -651,68 +702,52 @@ export default function App() {
     );
   };
 
-  // Completati/fasi/parziali – nasconde PRONTI > 7gg
-  const completati = useMemo(() => {
-    const now = Date.now();
-    const week = 7 * 24 * 3600 * 1000;
-    return baseFiltered
-      .filter((o: any) => !o.hidden)
-      .filter((o: any) => {
-        const inRightPhase =
-          o.status === 'eseguito' ||
-          o.status === 'in_essiccazione' ||
-          o.status === 'in_imballaggio' ||
-          o.status === 'pronti_consegna';
-        const parziale = Number(o.qty_done || 0) > 0;
-
-        if (o.status === 'pronti_consegna') {
-          const sca: any = o.status_changed_at;
-          const ts = sca?.toMillis ? sca.toMillis() : (typeof sca === 'number' ? sca : null);
-          if (ts && now - ts > week) return false;
-        }
-        return inRightPhase || parziale;
-      });
-  }, [baseFiltered]);
-
-  // colori etichette per badge completati
-  const badgeColor = (s: OrderItem['status'], qtyDone?: number) => {
-    if (s === 'in_essiccazione') return '#168a3d'; // VERDE
-    if (s === 'in_imballaggio') return '#d87f1f'; // ARANCIO
-    if (s === 'pronti_consegna') return '#168a3d'; // VERDE
-    if (s === 'eseguito') return '#555';           // GRIGIO
-    if ((qtyDone ?? 0) > 0) return '#555';         // PARZIALE → grigio
-    return '#666';
-  };
-  const badgeLabel = (s: OrderItem['status'], qtyDone?: number) => {
-    if (s === 'in_essiccazione') return 'ESSICCAZIONE';
-    if (s === 'in_imballaggio') return 'IMBALLAGGIO';
-    if (s === 'pronti_consegna') return 'PRONTI';
-    if (s === 'eseguito') return 'COMPLETATO';
-    if ((qtyDone ?? 0) > 0) return 'PARZIALE';
-    return 'COMPLETATO';
-  };
-
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* Top bar con file più corto */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <div style={{ maxWidth: 320, width: '100%' }}>
-          <input
-            type="file"
-            accept=".csv,.txt"
-            onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])}
-            style={{ width: '100%' }}
-          />
+      {/* RIGA TOP: pulsanti + CRUSCOTTO a destra */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12, alignItems: 'start', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ maxWidth: 320, width: '100%' }}>
+            <input
+              type="file"
+              accept=".csv,.txt"
+              onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
+          <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
         </div>
-        <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
-        <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
+
+        {/* CRUSCOTTO COMPATTO (alto a destra, sticky) */}
+        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, position: 'sticky', top: 12, height: 'fit-content' }}>
+          <h3 style={{ marginTop: 0, fontSize: 16 }}>Cruscotto</h3>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <label>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>Ordini dal…</div>
+              <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+            </label>
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
+              <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
+              <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
+              <div>Completati: <strong>{kpi.eseguiti}</strong></div>
+            </div>
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
+              <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
+              <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
+            </div>
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
+              <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
+            </div>
+          </div>
+        </aside>
       </div>
 
-      {/* layout: tabella + colonna destra stretta con due box */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        {/* TABELLA ORDINI */}
+      {/* RIGA MAIN: tabella + COMPLETATI piccolo a destra */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 16 }}>
+        {/* TABELLA ORDINI (solo non-parziali e non-fasi) */}
         <div className="table-wrap">
           <table className="table" style={{ width: '100%' }}>
             <thead>
@@ -816,41 +851,10 @@ export default function App() {
           </table>
         </div>
 
-        {/* COLONNA DESTRA — BOX 1: CRUSCOTTO COMPATTO */}
+        {/* COMPLETATI – box piccolo a destra, con “bottoni” stato */}
         <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, height: 'fit-content', position: 'sticky', top: 12 }}>
-          <h3 style={{ marginTop: 0, fontSize: 18 }}>Cruscotto</h3>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <label>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Ordini dal…</div>
-              <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
-            </label>
-
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
-              <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
-              <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
-              <div>Completati: <strong>{kpi.eseguiti}</strong></div>
-            </div>
-
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
-              <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
-              <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
-            </div>
-
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
-              <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
-            </div>
-          </div>
-        </aside>
-      </div>
-
-      {/* COLONNA DESTRA — BOX 2: COMPLETATI COMPATTO (PIÙ PICCOLO) */}
-      <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        <div /> {/* spazio a sinistra per allineare alla tabella */}
-        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <h3 style={{ margin: 0, fontSize: 18 }}>Completati</h3>
-          </div>
-          <div style={{ maxHeight: 220, overflow: 'auto', display: 'grid', gap: 6 }}>
+          <h3 style={{ margin: 0, fontSize: 16, marginBottom: 6 }}>Completati</h3>
+          <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
             {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
             {completati.map((o) => (
               <button
