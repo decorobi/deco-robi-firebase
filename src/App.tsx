@@ -1,3 +1,4 @@
+// App.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import Papa, { ParseResult } from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -223,7 +224,7 @@ export default function App() {
     });
   }, [orders, filterFrom]);
 
-  // a sinistra mostro tutto tranne gli "eseguito" (che vanno solo a destra)
+  // a sinistra mostro tutto tranne gli "eseguito"
   const visibleOrders = useMemo(
     () => baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status !== 'eseguito'),
     [baseFiltered]
@@ -651,7 +652,7 @@ export default function App() {
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* TOP ROW: controlli + CRUSCOTTO che si espande fino al bordo destro */}
+      {/* TOP ROW: controlli + CRUSCOTTO espanso */}
       <div
         style={{
           display: 'flex',
@@ -661,7 +662,7 @@ export default function App() {
           flexWrap: 'nowrap'
         }}
       >
-        {/* controlli a sinistra */}
+        {/* controlli */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ maxWidth: 320 }}>
             <input
@@ -675,7 +676,7 @@ export default function App() {
           <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
         </div>
 
-        {/* CRUSCOTTO allargato: prende tutto lo spazio rimanente */}
+        {/* CRUSCOTTO */}
         <div
           style={{
             marginLeft: 12,
@@ -708,7 +709,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* TABELLA + COMPLETATI (destra) */}
+      {/* TABELLA + COMPLETATI */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
         {/* TABELLA */}
         <div className="table-wrap">
@@ -830,7 +831,7 @@ export default function App() {
               <button
                 key={(o as any).id}
                 className="btn"
-                onClick={() => setAdvanceOpen(true) || setAdvanceTarget(o as any)}
+                onClick={() => { setAdvanceTarget(o as any); setAdvanceOpen(true); }}
                 style={{
                   justifyContent: 'space-between',
                   background: badgeColor((o as any).status, (o as any).qty_done as any),
