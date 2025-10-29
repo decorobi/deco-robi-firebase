@@ -1,35 +1,24 @@
+/* === Gestione Produzione (fix layout cruscotto/completati, passaggi leggibili) === */
 import React, { useEffect, useMemo, useState } from 'react';
 import Papa, { ParseResult } from 'papaparse';
 import * as XLSX from 'xlsx';
 import type { Operator, OrderItem } from './types';
 import { db, ensureAnonAuth } from './lib/firebaseClient';
 import {
-  collection,
-  getDocs,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
-  query,
-  orderBy,
+  collection, getDocs, doc, setDoc, updateDoc, deleteDoc,
+  serverTimestamp, query, orderBy,
 } from 'firebase/firestore';
 
 /* -------------------- Utils -------------------- */
-
 type RowIn = Record<string, any>;
-
 const parseNumberIT = (v: any): number | null => {
   if (v === null || v === undefined) return null;
-  let s = String(v).trim();
-  if (s === '') return null;
+  let s = String(v).trim(); if (s === '') return null;
   if (s.includes('.') && s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
   else if (s.includes(',')) s = s.replace(',', '.');
   else if (s.includes('.')) if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+  const n = Number(s); return Number.isFinite(n) ? n : null;
 };
-
 function secToHMS(total: number = 0) {
   const sec = Math.max(0, Math.floor(total || 0));
   const h = String(Math.floor(sec / 3600)).padStart(2, '0');
@@ -37,7 +26,6 @@ function secToHMS(total: number = 0) {
   const s = String(sec % 60).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
-
 type StepAgg = { step: number; pieces: number; timeSec: number };
 function aggregateStepStats(row: any): StepAgg[] {
   const time = (row?.steps_time ?? {}) as Record<string | number, number>;
@@ -46,59 +34,38 @@ function aggregateStepStats(row: any): StepAgg[] {
     ...Object.keys(time).map((n) => Number(n)),
     ...Object.keys(prog).map((n) => Number(n)),
   ].filter((n) => Number.isFinite(n) && n > 0));
-  return [...steps]
-    .map((step) => ({
-      step,
-      pieces: Number((prog as any)[step] ?? 0),
-      timeSec: Number((time as any)[step] ?? 0),
-    }))
-    .sort((a, b) => a.step - b.step);
+  return [...steps].map((step) => ({
+    step, pieces: Number((prog as any)[step] ?? 0), timeSec: Number((time as any)[step] ?? 0),
+  })).sort((a, b) => a.step - b.step);
 }
-
 const toDocId = (order: string | number, code: string) =>
   `${String(order)}__${String(code)}`.trim().replace(/[\/\\]/g, '_').replace(/\s+/g, ' ');
-
 const normalize = (s: string) =>
   String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-
 const pick = (row: Record<string, any>, aliases: string[]) => {
   const nk = Object.keys(row).map((k) => [k, normalize(k)] as const);
-  const want = aliases.map(normalize);
-  const hit = nk.find(([_, n]) => want.includes(n));
+  const want = aliases.map(normalize); const hit = nk.find(([_, n]) => want.includes(n));
   return hit ? row[hit[0]] : undefined;
 };
-
-function getDayBounds(date: Date) {
-  const start = new Date(date); start.setHours(0, 0, 0, 0);
-  const end = new Date(date);   end.setHours(23, 59, 59, 999);
-  return { start, end };
-}
-
-function computeFullyDone(
-  stepsCount: number,
-  stepsProgress: Record<string | number, number> | undefined,
-  defaultZero = 0,
-): number {
+function getDayBounds(date: Date) { const s = new Date(date); s.setHours(0,0,0,0); const e = new Date(date); e.setHours(23,59,59,999); return { start: s, end: e }; }
+function computeFullyDone(stepsCount: number, stepsProgress: Record<string | number, number> | undefined, defaultZero = 0) {
   if (!stepsCount || stepsCount <= 0) return 0;
-  const vals: number[] = [];
-  for (let i = 1; i <= stepsCount; i++) vals.push(Number((stepsProgress as any)?.[i] ?? 0) || 0);
-  if (vals.length === 0) return 0;
-  return Math.max(defaultZero, Math.min(...vals));
+  const vals: number[] = []; for (let i=1;i<=stepsCount;i++) vals.push(Number((stepsProgress as any)?.[i] ?? 0) || 0);
+  if (vals.length === 0) return 0; return Math.max(defaultZero, Math.min(...vals));
 }
 
-/* -------------------- UI Helpers -------------------- */
-
+/* -------------------- Modal -------------------- */
 function Modal(props: { open: boolean; onClose: () => void; children: React.ReactNode; title?: string }) {
   if (!props.open) return null;
   return (
     <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}
+      style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999 }}
       onClick={props.onClose}
     >
-      <div className="card" style={{ minWidth: 360, maxWidth: '92vw', padding: 16 }} onClick={(e) => e.stopPropagation()}>
-        {props.title && <h3 style={{ marginTop: 0 }}>{props.title}</h3>}
+      <div className="card" style={{ minWidth:360, maxWidth:'92vw', padding:16 }} onClick={(e) => e.stopPropagation()}>
+        {props.title && <h3 style={{ marginTop:0 }}>{props.title}</h3>}
         {props.children}
-        <div style={{ textAlign: 'right', marginTop: 12 }}>
+        <div style={{ textAlign:'right', marginTop:12 }}>
           <button className="btn btn-secondary" onClick={props.onClose}>Chiudi</button>
         </div>
       </div>
@@ -107,7 +74,6 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
 }
 
 /* -------------------- Component -------------------- */
-
 type TimerState = { running: boolean; startedAt: number | null; elapsed: number };
 
 export default function App() {
@@ -116,27 +82,26 @@ export default function App() {
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
   const [tick, setTick] = useState(0);
 
-  // stile blink per "Riprendi"
   useEffect(() => {
     const id = 'blink-style';
     if (!document.getElementById(id)) {
       const el = document.createElement('style');
       el.id = id;
       el.innerHTML = `
-        @keyframes blinkPulse { 0%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.03);filter:brightness(1.25)}100%{transform:scale(1);filter:brightness(1)}}
+        @keyframes blinkPulse { 0%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.03);filter:brightness(1.25)}100%{transform:scale(1);filter:brightness(1)} }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
       `;
       document.head.appendChild(el);
     }
   }, []);
 
-  // MODALS
+  // modals
   const [stopOpen, setStopOpen] = useState(false);
   const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
-  const [stopOperator, setStopOperator] = useState<string>('');
-  const [stopPieces, setStopPieces] = useState<number>(0);
-  const [stopStep, setStopStep] = useState<number>(1);
-  const [stopNotes, setStopNotes] = useState<string>('');
+  const [stopOperator, setStopOperator] = useState('');
+  const [stopPieces, setStopPieces] = useState(0);
+  const [stopStep, setStopStep] = useState(1);
+  const [stopNotes, setStopNotes] = useState('');
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [newOperatorName, setNewOperatorName] = useState('');
@@ -152,13 +117,13 @@ export default function App() {
 
   const [advanceOpen, setAdvanceOpen] = useState(false);
   const [advanceTarget, setAdvanceTarget] = useState<OrderItem | null>(null);
-  const [advancePhase, setAdvancePhase] = useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
-  const [advancePacked, setAdvancePacked] = useState<number>(0);
+  const [advancePhase, setAdvancePhase] =
+    useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
+  const [advancePacked, setAdvancePacked] = useState(0);
 
-  // filtro “Ordini dal…”
-  const [filterFrom, setFilterFrom] = useState<string>(''); // yyyy-mm-dd
+  const [filterFrom, setFilterFrom] = useState(''); // yyyy-mm-dd
 
-  // carica dati
+  // load
   useEffect(() => {
     (async () => {
       await ensureAnonAuth();
@@ -169,7 +134,7 @@ export default function App() {
     })();
   }, []);
 
-  // tick timer
+  // timer tick
   useEffect(() => {
     const anyRunning = Object.values(timers).some((t) => t.running);
     if (!anyRunning) return;
@@ -177,7 +142,7 @@ export default function App() {
     return () => clearInterval(h);
   }, [timers]);
 
-  const createdAtMs = (o: any): number | null => {
+  const createdAtMs = (o: any) => {
     const ca: any = o.created_at;
     if (!ca) return null;
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
@@ -192,22 +157,22 @@ export default function App() {
     });
   }, [orders, filterFrom]);
 
-  // SINISTRA: mostra solo ordini non in fasi e non parziali
+  // SINISTRA: non mostrare ciò che è parziale o in fasi (quelli vanno nei Completati)
   const visibleOrders = useMemo(
     () => baseFiltered.filter((o: any) => {
       if (o.hidden) return false;
-      const right =
+      const inRight =
         o.status === 'eseguito' || o.status === 'in_essiccazione' ||
         o.status === 'in_imballaggio' || o.status === 'pronti_consegna';
       const parziale = Number(o.qty_done || 0) > 0;
-      return !right && !parziale;
+      return !inRight && !parziale;
     }),
     [baseFiltered]
   );
 
   const kpi = useMemo(() => {
-    const byStatus = (st: OrderItem['status']) => visibleOrders.filter((o) => o.status === st).length;
-    return { da_iniziare: byStatus('da_iniziare'), in_esecuzione: byStatus('in_esecuzione'), eseguiti: byStatus('eseguito') };
+    const by = (st: OrderItem['status']) => visibleOrders.filter((o) => o.status === st).length;
+    return { da_iniziare: by('da_iniziare'), in_esecuzione: by('in_esecuzione'), eseguiti: by('eseguito') };
   }, [visibleOrders]);
 
   const todayAgg = useMemo(() => {
@@ -224,7 +189,7 @@ export default function App() {
     return { pezziOggi: pezzi, secOggi: sec };
   }, [baseFiltered]);
 
-  /* ------------------- IMPORT ------------------- */
+  /* ------------------- Import ------------------- */
   const handleImportCSV = async (file: File) => {
     try {
       await ensureAnonAuth();
@@ -238,14 +203,14 @@ export default function App() {
       if (!parsed || parsed.length === 0) throw new Error('Il file CSV sembra vuoto o senza intestazioni.');
 
       const batch = parsed.map((r) => {
-        const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
+        const order_number = pick(r, ['numero ordine','n ordine','ordine','num ordine']);
         const customer = pick(r, ['cliente']);
-        const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod']);
-        const description = pick(r, ['descrizione', 'descr', 'descrizione prodotto', 'desc', 'descr.']);
+        const product_code = pick(r, ['codice prodotto','codice','prodotto','codice prod']);
+        const description = pick(r, ['descrizione','descr','descrizione prodotto','desc','descr.']);
         const mlVal = pick(r, ['ml']);
-        const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta']);
-        const qty_in_oven = pick(r, ['inforno', 'in forno']);
-        const steps = pick(r, ['passaggi', 'n passaggi', 'passi']);
+        const qty_requested = pick(r, ['quantita inserita','quantità inserita','quantita','qty richiesta','qta richiesta']);
+        const qty_in_oven = pick(r, ['inforno','in forno']);
+        const steps = pick(r, ['passaggi','n passaggi','passi']);
         if (!order_number || !product_code) return null;
         return {
           order_number: String(order_number),
@@ -258,11 +223,8 @@ export default function App() {
           qty_done: 0,
           steps_count: Number(parseNumberIT(steps ?? 0)) || 0,
           steps_progress: {}, steps_time: {},
-          packed_qty: 0,
-          status: 'da_iniziare' as const,
-          created_at: serverTimestamp(),
-          hidden: false,
-          notes_log: [],
+          packed_qty: 0, status: 'da_iniziare' as const,
+          created_at: serverTimestamp(), hidden: false, notes_log: [],
         };
       }).filter(Boolean) as any[];
 
@@ -275,8 +237,7 @@ export default function App() {
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
       alert(`Import completato (${batch.length} righe).`);
     } catch (err: any) {
-      console.error(err);
-      alert('Errore import: ' + err.message);
+      console.error(err); alert('Errore import: ' + err.message);
     }
   };
 
@@ -301,10 +262,7 @@ export default function App() {
     setOrders((prev) => prev.map((o: any) => (o.id === row.id ? { ...o, status: 'in_esecuzione', timer_start: Date.now() } : o)) as any);
   };
 
-  const openStop = (row: any) => {
-    setStopTarget(row); setStopPieces(0); setStopStep(1); setStopOperator(''); setStopNotes(''); setStopOpen(true);
-  };
-
+  const openStop = (row: any) => { setStopTarget(row); setStopPieces(0); setStopStep(1); setStopOperator(''); setStopNotes(''); setStopOpen(true); };
   const confirmStop = async () => {
     if (!stopTarget) return;
     const row: any = stopTarget;
@@ -348,16 +306,17 @@ export default function App() {
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
     setOrders((prev) => prev.map((o: any) =>
       o.id === row.id
-        ? { ...o, status: isCompletedTot ? 'eseguito' : 'da_iniziare', elapsed_sec: 0, timer_start: null,
-            steps_time: nextStepsTime, steps_progress: nextStepsProg, qty_done: qtyDone,
-            last_operator: stopOperator || null, last_notes: stopNotes || null, last_step: pass,
+        ? { ...o, status: isCompletedTot ? 'eseguito' : 'da_iniziare',
+            elapsed_sec: 0, timer_start: null,
+            steps_time: nextStepsTime, steps_progress: nextStepsProg,
+            qty_done: qtyDone, last_operator: stopOperator || null, last_notes: stopNotes || null, last_step: pass,
             last_pieces: Number(stopPieces || 0), last_duration_sec: spentSec, last_done_at: new Date() as any, notes_log: notesLog }
         : o
     ) as any);
     setStopOpen(false);
   };
 
-  /* ------------------- ADMIN ------------------- */
+  /* ------------------- Admin ------------------- */
   const addOperator = async () => {
     const name = newOperatorName.trim(); if (!name) return;
     const id = name.toLowerCase().replace(/\s+/g, '_');
@@ -389,7 +348,6 @@ export default function App() {
     const order_number = newOrder.order_number.trim();
     const product_code = newOrder.product_code.trim();
     if (!order_number || !product_code) { alert('Ordine e Codice sono obbligatori'); return; }
-
     const row = {
       order_number, customer: newOrder.customer.trim(), product_code,
       description: newOrder.description.trim(),
@@ -401,7 +359,6 @@ export default function App() {
       packed_qty: 0, status: 'da_iniziare' as const,
       created_at: serverTimestamp(), hidden: false, notes_log: [],
     };
-
     const id = toDocId(row.order_number, row.product_code);
     await setDoc(doc(db, 'order_items', id), row, { merge: true });
     setOrders((prev) => [{ id, ...(row as any) }, ...prev]);
@@ -444,14 +401,13 @@ export default function App() {
     });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Riepilogo');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(aggRows, { header: ['Ordine', 'Riga', 'Passaggio', 'Pezzi', 'Tempo'] }), 'Tempi per passaggio');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(aggRows, { header: ['Ordine','Riga','Passaggio','Pezzi','Tempo'] }), 'Tempi per passaggio');
     XLSX.writeFile(wb, `deco-riepilogo-${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   /* ------------------- Completati ------------------- */
   const completati = useMemo(() => {
-    const now = Date.now();
-    const week = 7 * 24 * 3600 * 1000;
+    const now = Date.now(); const week = 7 * 24 * 3600 * 1000;
     return baseFiltered
       .filter((o: any) => !o.hidden)
       .filter((o: any) => {
@@ -483,74 +439,41 @@ export default function App() {
     return 'COMPLETATO';
   };
 
-  /* -------------------- Render -------------------- */
-
+  /* ------------------- Render helpers ------------------- */
   const renderPassaggiCell = (row: any) => {
     const stats = aggregateStepStats(row);
     if (!stats.length) return <>—</>;
     return (
-      <div style={{ display: 'grid', gap: 2 }}>
+      <div style={{ display:'grid', gap:2, minWidth:160, lineHeight:1.25 }}>
         {stats.map((s) => (
-          <div key={s.step} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-            <strong style={{ display: 'inline-block', minWidth: 24 }}>P{s.step}</strong>{': '}
-            <span>{s.pieces} pz</span>{' · '}
-            <span>{secToHMS(s.timeSec)}</span>
+          <div key={s.step} style={{ fontSize:12, whiteSpace:'nowrap' }}>
+            <strong style={{ display:'inline-block', minWidth:24 }}>P{s.step}</strong>{': '}
+            <span>{s.pieces} pz</span>{' · '}<span>{secToHMS(s.timeSec)}</span>
           </div>
         ))}
       </div>
     );
   };
 
-  const CRUSCOTTO_W = 320; // larghezza riquadro a destra della toolbar
-
+  /* ------------------- UI ------------------- */
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* TOOLBAR con CRUSCOTTO assoluto a destra */}
-      <div style={{ position: 'relative', paddingRight: CRUSCOTTO_W + 16, marginBottom: 8 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ maxWidth: 320, width: '100%' }}>
-            <input type="file" accept=".csv,.txt" onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])} style={{ width: '100%' }} />
-          </div>
-          <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
-          <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
+      {/* Toolbar */}
+      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:12, flexWrap:'wrap' }}>
+        <div style={{ maxWidth: 320, width: '100%' }}>
+          <input type="file" accept=".csv,.txt" onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])} style={{ width:'100%' }} />
         </div>
-
-        {/* Cruscotto: NON spinge la tabella (absolute) */}
-        <aside
-          style={{
-            position: 'absolute', right: 0, top: 0, width: CRUSCOTTO_W,
-            border: '1px solid #ddd', borderRadius: 8, padding: 12, background: 'rgba(0,0,0,0.15)',
-          }}
-        >
-          <h3 style={{ marginTop: 0, fontSize: 16 }}>Cruscotto</h3>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <label>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Ordini dal…</div>
-              <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
-            </label>
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
-              <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
-              <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
-              <div>Completati: <strong>{kpi.eseguiti}</strong></div>
-            </div>
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
-              <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
-              <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
-            </div>
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
-              <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
-            </div>
-          </div>
-        </aside>
+        <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
+        <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
       </div>
 
-      {/* MAIN: Tabella + riquadro Completati compatto a destra */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 16 }}>
-        {/* Tabella ordini (sinistra) */}
+      {/* Layout a 2 colonne: tabella + colonna destra (sticky) */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:16 }}>
+        {/* TABELLA */}
         <div className="table-wrap">
-          <table className="table" style={{ width: '100%' }}>
+          <table className="table" style={{ width:'100%' }}>
             <thead>
               <tr>
                 <th>Ordine</th><th>Cliente</th><th>Codice</th><th>Descrizione</th>
@@ -561,7 +484,7 @@ export default function App() {
             <tbody>
               {visibleOrders.map((row: any) => {
                 const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
-                const _ = tick; // forza re-render
+                const _ = tick;
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((Date.now() - t.startedAt) / 1000) : t.elapsed;
                 const richiesta = Number(row.qty_requested ?? 0);
                 const fatta = Number(row.qty_done ?? 0);
@@ -572,7 +495,7 @@ export default function App() {
                     <td>{row.customer || ''}</td>
                     <td>{row.product_code}</td>
                     <td>
-                      <div title={(row as any).description || ''} style={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: (row as any).description ? 1 : 0.6 }}>
+                      <div title={(row as any).description || ''} style={{ maxWidth:260, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', opacity:(row as any).description ? 1 : 0.6 }}>
                         {(row as any).description || '—'}
                       </div>
                     </td>
@@ -581,19 +504,19 @@ export default function App() {
                     <td>{rimanente}</td>
                     <td>{renderPassaggiCell(row)}</td>
                     <td>
-                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{secToHMS(elapsed)}</span>
+                      <span style={{ fontVariantNumeric:'tabular-nums' }}>{secToHMS(elapsed)}</span>
                       {row.status === 'pausato' && (
-                        <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 6, background: '#666', color: 'white' }}>Pausa</span>
+                        <span style={{ marginLeft:8, padding:'2px 8px', borderRadius:6, background:'#666', color:'white' }}>Pausa</span>
                       )}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
                         <button className="btn btn-primary" disabled={row.status !== 'da_iniziare'} onClick={() => onStart(row)}>Start</button>
                         {row.status === 'in_esecuzione' && (<button className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>)}
                         <button className={`btn btn-success ${row.status === 'pausato' ? 'blink' : ''}`} disabled={row.status !== 'pausato'} onClick={() => onResume(row)}>Riprendi</button>
                         <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
                         {((row as any).notes_log && (row as any).notes_log.length > 0) && (
-                          <button className="btn" onClick={() => { setNotesTarget(row); setNotesOpen(true); }} style={{ padding: '4px 8px', fontSize: 12 }} title="Vedi note">Note</button>
+                          <button className="btn" onClick={() => { setNotesTarget(row); setNotesOpen(true); }} style={{ padding:'4px 8px', fontSize:12 }} title="Vedi note">Note</button>
                         )}
                       </div>
                     </td>
@@ -604,40 +527,65 @@ export default function App() {
           </table>
         </div>
 
-        {/* Completati (destra, piccolo) */}
-        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, height: 'fit-content', position: 'sticky', top: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 16, marginBottom: 6 }}>Completati</h3>
-          <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
-            {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
-            {completati.map((o) => (
-              <button
-                key={(o as any).id}
-                className="btn"
-                onClick={() => openAdvance(o as any)}
-                style={{ justifyContent: 'space-between', background: badgeColor(o.status, (o as any).qty_done as any), color: 'white', padding: '6px 10px' }}
-                title={(o as any).description || ''}
-              >
-                <span style={{ textAlign: 'left', fontSize: 13 }}>
-                  {o.order_number} · {o.product_code}
-                </span>
-                <span style={{ opacity: 0.9, fontSize: 12 }}>
-                  {badgeLabel(o.status, (o as any).qty_done as any)} {(o as any).qty_done ? `(${(o as any).qty_done}/${o.qty_requested})` : ''}
-                </span>
-              </button>
-            ))}
-          </div>
-        </aside>
+        {/* COLONNA DESTRA (sticky) */}
+        <div style={{ position:'sticky', top:12, alignSelf:'start', display:'grid', gap:12 }}>
+          {/* CRUSCOTTO */}
+          <aside style={{ border:'1px solid #ddd', borderRadius:8, padding:12, background:'rgba(0,0,0,0.12)' }}>
+            <h3 style={{ marginTop:0, fontSize:16 }}>Cruscotto</h3>
+            <div style={{ display:'grid', gap:8 }}>
+              <label>
+                <div style={{ fontSize:12, opacity:0.8 }}>Ordini dal…</div>
+                <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+              </label>
+              <div style={{ borderTop:'1px solid #eee', paddingTop:8, fontSize:14, lineHeight:1.4 }}>
+                <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
+                <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
+                <div>Completati: <strong>{kpi.eseguiti}</strong></div>
+              </div>
+              <div style={{ borderTop:'1px solid #eee', paddingTop:8, fontSize:14, lineHeight:1.4 }}>
+                <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
+                <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
+              </div>
+              <div style={{ borderTop:'1px solid #eee', paddingTop:8 }}>
+                <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
+              </div>
+            </div>
+          </aside>
+
+          {/* COMPLETATI (compatto) */}
+          <aside style={{ border:'1px solid #ddd', borderRadius:8, padding:12 }}>
+            <h3 style={{ margin:0, fontSize:16, marginBottom:6 }}>Completati</h3>
+            <div style={{ maxHeight:260, overflow:'auto', display:'grid', gap:6 }}>
+              {completati.length === 0 && <div style={{ opacity:0.7, fontSize:14 }}>— nessun ordine —</div>}
+              {completati.map((o) => (
+                <button
+                  key={(o as any).id}
+                  className="btn"
+                  onClick={() => openAdvance(o as any)}
+                  style={{ justifyContent:'space-between', background: badgeColor(o.status, (o as any).qty_done as any), color:'white', padding:'6px 10px' }}
+                  title={(o as any).description || ''}
+                >
+                  <span style={{ textAlign:'left', fontSize:13 }}>
+                    {o.order_number} · {o.product_code}
+                  </span>
+                  <span style={{ opacity:0.9, fontSize:12 }}>
+                    {badgeLabel(o.status, (o as any).qty_done as any)} {(o as any).qty_done ? `(${(o as any).qty_done}/${o.qty_requested})` : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </aside>
+        </div>
       </div>
 
       {/* STOP MODAL */}
       <Modal open={stopOpen} onClose={() => setStopOpen(false)} title="Concludi lavorazione">
-        <div style={{ display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8, background:'#10151c',border:'1px solid #223',borderRadius:8,padding:8,marginBottom:8 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, background:'#10151c', border:'1px solid #223', borderRadius:8, padding:8, marginBottom:8 }}>
           <div><div style={{opacity:.7,fontSize:12}}>N. Ordine</div><strong>{stopTarget?.order_number}</strong></div>
           <div><div style={{opacity:.7,fontSize:12}}>Q.ta richiesta</div><strong>{Number(stopTarget?.qty_requested||0)}</strong></div>
           <div><div style={{opacity:.7,fontSize:12}}>Q.ta fatta</div><strong>{Number(stopTarget?.qty_done||0)}</strong></div>
         </div>
-
-        <div className="grid" style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display:'grid', gap:8 }}>
           <label>
             <div>Passaggio eseguito *</div>
             <select value={stopStep} onChange={(e) => setStopStep(Number(e.target.value))} required>
@@ -662,18 +610,18 @@ export default function App() {
             <input value={stopNotes} onChange={(e) => setStopNotes(e.target.value)} placeholder="Es. RAL 9010" />
           </label>
         </div>
-        <div style={{ textAlign: 'right', marginTop: 12 }}>
+        <div style={{ textAlign:'right', marginTop:12 }}>
           <button className="btn btn-danger" onClick={confirmStop}>Registra</button>
         </div>
       </Modal>
 
       {/* NOTE MODAL */}
       <Modal open={notesOpen} onClose={() => setNotesOpen(false)} title="Note ordine">
-        <div style={{ display: 'grid', gap: 8, maxHeight: 360, overflow: 'auto' }}>
+        <div style={{ display:'grid', gap:8, maxHeight:360, overflow:'auto' }}>
           {(!(notesTarget as any)?.notes_log || (notesTarget as any).notes_log.length === 0) && <div>Nessuna nota.</div>}
           {((notesTarget as any)?.notes_log ?? []).slice().reverse().map((n: any, idx: number) => (
-            <div key={idx} style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
+            <div key={idx} style={{ border:'1px solid #eee', borderRadius:6, padding:8 }}>
+              <div style={{ fontSize:12, opacity:0.8 }}>
                 {new Date(n.ts).toLocaleString()} • {n.operator || '—'} • Pass. {n.step} • {n.pieces} pz
               </div>
               <div>{n.text}</div>
@@ -684,7 +632,7 @@ export default function App() {
 
       {/* AVANZA FASE */}
       <Modal open={advanceOpen} onClose={() => setAdvanceOpen(false)} title="Avanza fase ordine completato">
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display:'grid', gap:8 }}>
           <div><strong>{advanceTarget?.order_number}</strong> · {advanceTarget?.product_code}</div>
           <label>
             <div>Quale passaggio vuoi eseguire ora?</div>
@@ -701,24 +649,24 @@ export default function App() {
             </label>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:12 }}>
           <button className="btn btn-primary" onClick={confirmAdvance}>Salva</button>
         </div>
       </Modal>
 
       {/* ADMIN */}
       <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori & Ordini">
-        <div style={{ display: 'grid', gap: 16 }}>
+        <div style={{ display:'grid', gap:16 }}>
           <div>
-            <h4 style={{ margin: '0 0 8px' }}>Operatori</h4>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <h4 style={{ margin:'0 0 8px' }}>Operatori</h4>
+            <div style={{ display:'flex', gap:8 }}>
               <input placeholder="Nuovo operatore" value={newOperatorName} onChange={(e) => setNewOperatorName(e.target.value)} />
               <button className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
             </div>
-            <div style={{ maxHeight: 200, overflow: 'auto', borderTop: '1px solid #eee', marginTop: 8, paddingTop: 8 }}>
+            <div style={{ maxHeight:200, overflow:'auto', borderTop:'1px solid #eee', marginTop:8, paddingTop:8 }}>
               {operators.map((op) => (
-                <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                  <div style={{ flex: 1 }}>{op.name} {op.active ? '' : <span style={{ color: '#a00' }}>(disattivo)</span>}</div>
+                <div key={op.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 0' }}>
+                  <div style={{ flex:1 }}>{op.name} {op.active ? '' : <span style={{ color:'#a00' }}>(disattivo)</span>}</div>
                   <button className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
                   <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
                 </div>
@@ -727,11 +675,11 @@ export default function App() {
           </div>
 
           <div>
-            <h4 style={{ margin: '0 0 8px' }}>Ordini (nascondi / ripristina)</h4>
-            <div style={{ maxHeight: 300, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8 }}>
+            <h4 style={{ margin:'0 0 8px' }}>Ordini (nascondi / ripristina)</h4>
+            <div style={{ maxHeight:300, overflow:'auto', borderTop:'1px solid #eee', paddingTop:8 }}>
               {baseFiltered.map((o: any) => (
-                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                  <div style={{ flex: 1, opacity: o.hidden ? 0.6 : 1 }}>
+                <div key={o.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 0' }}>
+                  <div style={{ flex:1, opacity:o.hidden ? 0.6 : 1 }}>
                     {o.order_number} · {o.product_code} — <em>{o.hidden ? 'CANCELLATO' : o.status}</em>
                   </div>
                   {!o.hidden ? (
@@ -742,7 +690,7 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
+            <div style={{ fontSize:12, opacity:0.8, marginTop:6 }}>
               Gli ordini nascosti non compaiono in schermata, ma saranno comunque presenti nello SCARICO EXCEL (Stato: CANCELLATO).
             </div>
           </div>
@@ -751,7 +699,7 @@ export default function App() {
 
       {/* INSERISCI ORDINE */}
       <Modal open={newOrderOpen} onClose={() => setNewOrderOpen(false)} title="Inserisci Ordine">
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display:'grid', gap:8 }}>
           <label><div>Numero Ordine *</div><input value={newOrder.order_number} onChange={(e) => setNewOrder({ ...newOrder, order_number: e.target.value })} /></label>
           <label><div>Cliente</div><input value={newOrder.customer} onChange={(e) => setNewOrder({ ...newOrder, customer: e.target.value })} /></label>
           <label><div>Codice Prodotto *</div><input value={newOrder.product_code} onChange={(e) => setNewOrder({ ...newOrder, product_code: e.target.value })} /></label>
@@ -760,7 +708,7 @@ export default function App() {
           <label><div>Q.ta richiesta</div><input type="number" value={newOrder.qty_requested as any} onChange={(e) => setNewOrder({ ...newOrder, qty_requested: e.target.value })} /></label>
           <label><div>N. passaggi</div><input type="number" min={0} value={newOrder.steps_count} onChange={(e) => setNewOrder({ ...newOrder, steps_count: Number(e.target.value || 0) })} /></label>
         </div>
-        <div style={{ textAlign: 'right', marginTop: 12 }}>
+        <div style={{ textAlign:'right', marginTop:12 }}>
           <button className="btn btn-primary" onClick={createOrder}>Crea</button>
         </div>
       </Modal>
