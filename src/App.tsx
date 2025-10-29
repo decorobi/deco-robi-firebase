@@ -223,7 +223,7 @@ export default function App() {
     const ca: any = o.created_at;
     if (!ca) return null;
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
-    };
+  };
 
   // ordini filtrati per data
   const baseFiltered = useMemo(() => {
@@ -398,7 +398,7 @@ export default function App() {
     if (!stopTarget) return;
     const row: any = stopTarget;
 
-    // --- VALIDAZIONE OBBLIGATORIA ---
+    // VALIDAZIONE OBBLIGATORIA
     const stepsCount = Number(row.steps_count || 0);
     if (!stopStep || stopStep < 1 || (stepsCount > 0 && stopStep > stepsCount)) {
       alert('Seleziona un passaggio valido.');
@@ -412,7 +412,6 @@ export default function App() {
       alert('Seleziona un operatore.');
       return;
     }
-    // ---------------------------------
 
     const t = timers[row.id!];
     const now = Date.now();
@@ -421,17 +420,14 @@ export default function App() {
 
     const pass = Number(stopStep || 0);
 
-    // accumula tempo e pezzi sul passaggio scelto
     const nextStepsTime: Record<number, number> = { ...(row.steps_time || {}) };
     nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + spentSec;
 
     const nextStepsProg: Record<number, number> = { ...(row.steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
-    // qty finita (min tra i passaggi)
     const qtyDone = computeFullyDone(Number(row.steps_count || 0), nextStepsProg, 0);
 
-    // note log (append)
     const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
     if (stopNotes && stopNotes.trim()) {
       notesLog.push({
@@ -443,7 +439,6 @@ export default function App() {
       });
     }
 
-    // completamento totale solo se raggiungo la richiesta
     const richiesta = Number(row.qty_requested || 0);
     const isCompletedTot = richiesta > 0 && qtyDone >= richiesta;
 
@@ -467,7 +462,6 @@ export default function App() {
       { merge: true }
     );
 
-    // aggiorna UI locale
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
     setOrders((prev) =>
       prev.map((o: any) =>
@@ -657,7 +651,7 @@ export default function App() {
     );
   };
 
-  // Completati/pannello destro: fasi + PARZIALI (qty_done > 0), nasconde PRONTI > 7 giorni
+  // Completati/fasi/parziali – nasconde PRONTI > 7gg
   const completati = useMemo(() => {
     const now = Date.now();
     const week = 7 * 24 * 3600 * 1000;
@@ -680,13 +674,13 @@ export default function App() {
       });
   }, [baseFiltered]);
 
-  // >>> COLORI/ETICHETTE AGGIORNATI
+  // colori etichette per badge completati
   const badgeColor = (s: OrderItem['status'], qtyDone?: number) => {
     if (s === 'in_essiccazione') return '#168a3d'; // VERDE
     if (s === 'in_imballaggio') return '#d87f1f'; // ARANCIO
     if (s === 'pronti_consegna') return '#168a3d'; // VERDE
-    if (s === 'eseguito') return '#555';           // GRIGIO (completato)
-    if ((qtyDone ?? 0) > 0) return '#555';         // parziale
+    if (s === 'eseguito') return '#555';           // GRIGIO
+    if ((qtyDone ?? 0) > 0) return '#555';         // PARZIALE → grigio
     return '#666';
   };
   const badgeLabel = (s: OrderItem['status'], qtyDone?: number) => {
@@ -702,15 +696,23 @@ export default function App() {
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* Top bar */}
+      {/* Top bar con file più corto */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <input type="file" accept=".csv,.txt" onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])} />
+        <div style={{ maxWidth: 320, width: '100%' }}>
+          <input
+            type="file"
+            accept=".csv,.txt"
+            onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])}
+            style={{ width: '100%' }}
+          />
+        </div>
         <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
         <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
-        {/* TABELLA ORDINI (FILTRATA + NON NASCOSTA) */}
+      {/* layout: tabella + colonna destra stretta con due box */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
+        {/* TABELLA ORDINI */}
         <div className="table-wrap">
           <table className="table" style={{ width: '100%' }}>
             <thead>
@@ -731,7 +733,7 @@ export default function App() {
               {visibleOrders.map((row: any) => {
                 const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number(row.elapsed_sec || 0) };
                 const now = Date.now();
-                const _ = tick; // forza re-render durante il running
+                const _ = tick; // re-render quando running
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
                 const richiesta = Number(row.qty_requested ?? 0);
@@ -747,7 +749,7 @@ export default function App() {
                       <div
                         title={(row as any).description || ''}
                         style={{
-                          maxWidth: 280,
+                          maxWidth: 220,
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -799,7 +801,7 @@ export default function App() {
                           <button
                             className="btn"
                             onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
-                            style={{ padding: '4px 8px', fontSize: 12 }}   // <<-- pulsante piccolo
+                            style={{ padding: '4px 8px', fontSize: 12 }}
                             title="Vedi note"
                           >
                             Note
@@ -814,58 +816,64 @@ export default function App() {
           </table>
         </div>
 
-        {/* CRUSCOTTO OPERATIVO */}
-        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
-          <h3 style={{ marginTop: 0 }}>CRUSCOTTO OPERATIVO</h3>
+        {/* COLONNA DESTRA — BOX 1: CRUSCOTTO COMPATTO */}
+        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, height: 'fit-content', position: 'sticky', top: 12 }}>
+          <h3 style={{ marginTop: 0, fontSize: 18 }}>Cruscotto</h3>
           <div style={{ display: 'grid', gap: 8 }}>
             <label>
-              <div>Ordini dal…</div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>Ordini dal…</div>
               <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
             </label>
 
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
-              <div>Ordini: <strong>da iniziare</strong> n° {kpi.da_iniziare}</div>
-              <div>Ordini: <strong>in esecuzione</strong> n° {kpi.in_esecuzione}</div>
-              <div>Ordini: <strong>eseguiti (completati)</strong> n° {kpi.eseguiti}</div>
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
+              <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
+              <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
+              <div>Completati: <strong>{kpi.eseguiti}</strong></div>
             </div>
 
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
-              <div>Oggi sono stati prodotti n° <strong>{todayAgg.pezziOggi}</strong> pezzi</div>
-              <div>Tempo eseguito oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 8, fontSize: 14, lineHeight: 1.4 }}>
+              <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
+              <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
             </div>
 
             <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
               <button className="btn" onClick={exportExcel}>SCARICO EXCEL</button>
             </div>
+          </div>
+        </aside>
+      </div>
 
-            {/* Completati + fasi + parziali */}
-            <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Completati</div>
-              <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
-                {completati.length === 0 && <div style={{ opacity: 0.7 }}>— nessun ordine —</div>}
-                {completati.map((o) => (
-                  <button
-                    key={(o as any).id}
-                    className="btn"
-                    onClick={() => openAdvance(o as any)}
-                    style={{
-                      justifyContent: 'space-between',
-                      background: badgeColor(o.status, (o as any).qty_done as any),
-                      color: 'white'
-                    }}
-                    title={(o as any).description || ''}
-                  >
-                    <span style={{ textAlign: 'left' }}>
-                      {o.order_number} · {o.product_code}
-                    </span>
-                    <span style={{ opacity: 0.9, fontSize: 12 }}>
-                      {badgeLabel(o.status, (o as any).qty_done as any)}{' '}
-                      {(o as any).qty_done ? `(${(o as any).qty_done}/${o.qty_requested})` : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* COLONNA DESTRA — BOX 2: COMPLETATI COMPATTO (PIÙ PICCOLO) */}
+      <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
+        <div /> {/* spazio a sinistra per allineare alla tabella */}
+        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <h3 style={{ margin: 0, fontSize: 18 }}>Completati</h3>
+          </div>
+          <div style={{ maxHeight: 220, overflow: 'auto', display: 'grid', gap: 6 }}>
+            {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
+            {completati.map((o) => (
+              <button
+                key={(o as any).id}
+                className="btn"
+                onClick={() => openAdvance(o as any)}
+                style={{
+                  justifyContent: 'space-between',
+                  background: badgeColor(o.status, (o as any).qty_done as any),
+                  color: 'white',
+                  padding: '6px 10px'
+                }}
+                title={(o as any).description || ''}
+              >
+                <span style={{ textAlign: 'left', fontSize: 13 }}>
+                  {o.order_number} · {o.product_code}
+                </span>
+                <span style={{ opacity: 0.9, fontSize: 12 }}>
+                  {badgeLabel(o.status, (o as any).qty_done as any)}{' '}
+                  {(o as any).qty_done ? `(${(o as any).qty_done}/${o.qty_requested})` : ''}
+                </span>
+              </button>
+            ))}
           </div>
         </aside>
       </div>
@@ -973,7 +981,7 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* ADMIN MODAL (operatori + gestione ordini) */}
+      {/* ADMIN MODAL */}
       <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori & Ordini">
         <div style={{ display: 'grid', gap: 16 }}>
           {/* Operatori */}
