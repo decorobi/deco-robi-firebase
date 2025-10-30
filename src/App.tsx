@@ -143,8 +143,9 @@ export default function App() {
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
   const [tick, setTick] = useState(0);
 
+  // stile blink + stile "row-card" per le righe a riquadro stondato
   useEffect(() => {
-    const id = 'blink-style';
+    const id = 'extra-style';
     if (!document.getElementById(id)) {
       const el = document.createElement('style');
       el.id = id;
@@ -155,11 +156,20 @@ export default function App() {
           100% { transform: scale(1); filter: brightness(1); }
         }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
+
+        /* righe come card dentro la tabella */
+        .table { border-collapse: separate !important; border-spacing: 0 10px !important; }
+        .table tbody tr { position: relative; }
+        .table tbody tr::before {
+          content: ""; position: absolute; left: -6px; right: -6px; top: -4px; bottom: -4px;
+          border: 1px solid #2b2f3a; border-radius: 12px; background: rgba(255,255,255,0.02); z-index: -1;
+        }
       `;
       document.head.appendChild(el);
     }
   }, []);
 
+  // MODALS
   const [stopOpen, setStopOpen] = useState(false);
   const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
   const [stopOperator, setStopOperator] = useState<string>('');
@@ -190,8 +200,10 @@ export default function App() {
     useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
   const [advancePacked, setAdvancePacked] = useState<number>(0);
 
+  // CRUSCOTTO: filtro “Ordini dal …”
   const [filterFrom, setFilterFrom] = useState<string>(''); // yyyy-mm-dd
 
+  // carica dati
   useEffect(() => {
     (async () => {
       await ensureAnonAuth();
@@ -202,6 +214,7 @@ export default function App() {
     })();
   }, []);
 
+  // tick timer quando c’è almeno un running
   useEffect(() => {
     const anyRunning = Object.values(timers).some((t) => t.running);
     if (!anyRunning) return;
@@ -209,12 +222,14 @@ export default function App() {
     return () => clearInterval(h);
   }, [timers]);
 
+  // helper date created_at
   const createdAtMs = (o: any): number | null => {
     const ca: any = o.created_at;
     if (!ca) return null;
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
   };
 
+  // ordini filtrati per data
   const baseFiltered = useMemo(() => {
     if (!filterFrom) return orders;
     const from = new Date(filterFrom + 'T00:00:00').getTime();
@@ -230,6 +245,7 @@ export default function App() {
     [baseFiltered]
   );
 
+  // KPI sul filtrato visibile
   const kpi = useMemo(() => {
     const byStatus = (st: any) =>
       baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status === st).length;
@@ -240,6 +256,7 @@ export default function App() {
     };
   }, [baseFiltered]);
 
+  // oggi (pezzi/tempo) su TUTTI (anche nascosti)
   const todayAgg = useMemo(() => {
     const { start, end } = getDayBounds(new Date());
     let pezzi = 0;
@@ -268,6 +285,7 @@ export default function App() {
         });
       });
       if (!parsed || parsed.length === 0) throw new Error('Il file CSV sembra vuoto o senza intestazioni.');
+
       const batch = parsed
         .map((r) => {
           const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
@@ -296,6 +314,8 @@ export default function App() {
             created_at: serverTimestamp(),
             hidden: false,
             notes_log: [],
+            ops_log: [],             // <- log attività operatori
+            total_elapsed_sec: 0,    // <- timer cumulativo
           };
         })
         .filter(Boolean) as any[];
@@ -314,10 +334,12 @@ export default function App() {
   };
 
   /* ------------------- TIMER ------------------- */
+  const baseElapsedOf = (row: any) => Number((row as any).total_elapsed_sec ?? (row as any).elapsed_sec ?? 0);
+
   const onStart = async (row: any) => {
     setTimers((t) => ({
       ...t,
-      [row.id!]: { running: true, startedAt: Date.now(), elapsed: Number((row as any).elapsed_sec || 0) },
+      [row.id!]: { running: true, startedAt: Date.now(), elapsed: baseElapsedOf(row) },
     }));
     await updateDoc(doc(db, 'order_items', row.id!), {
       status: 'in_esecuzione',
@@ -331,28 +353,29 @@ export default function App() {
   };
 
   const onPause = async (row: any) => {
-    const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number((row as any).elapsed_sec || 0) };
+    const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
     const now = Date.now();
     const extra = t.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
-    const elapsed = (t.elapsed || 0) + extra;
+    const elapsed = (t.elapsed || 0) + extra; // cumulativo
 
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed } }));
 
     await updateDoc(doc(db, 'order_items', row.id!), {
       status: 'pausato',
       elapsed_sec: elapsed,
+      total_elapsed_sec: elapsed,   // <- salva cumulativo
       timer_start: null,
     } as any);
 
     setOrders((prev) =>
       prev.map((o: any) =>
-        o.id === row.id ? { ...o, status: 'pausato', elapsed_sec: elapsed, timer_start: null } : o
+        o.id === row.id ? { ...o, status: 'pausato', elapsed_sec: elapsed, total_elapsed_sec: elapsed, timer_start: null } : o
       ) as any
     );
   };
 
   const onResume = async (row: any) => {
-    const prevElapsed = Number(timers[row.id!]?.elapsed ?? (row as any).elapsed_sec ?? 0);
+    const prevElapsed = Number(timers[row.id!]?.elapsed ?? baseElapsedOf(row) ?? 0);
     setTimers((t) => ({
       ...t,
       [row.id!]: { running: true, startedAt: Date.now(), elapsed: prevElapsed },
@@ -383,6 +406,7 @@ export default function App() {
     if (!stopTarget) return;
     const row: any = stopTarget;
 
+    // VALIDAZIONE
     const stepsCount = Number((row as any).steps_count || 0);
     if (!stopStep || stopStep < 1 || (stepsCount > 0 && stopStep > stepsCount)) {
       alert('Seleziona un passaggio valido.');
@@ -399,19 +423,23 @@ export default function App() {
 
     const t = timers[row.id!];
     const now = Date.now();
-    const elapsedFromRun = t?.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
-    const spentSec = Math.max(0, (t?.elapsed || 0) + elapsedFromRun);
+    const extraFromRun = t?.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
+    const prevElapsed = baseElapsedOf(row);
+    const totalElapsed = Math.max(0, prevElapsed + extraFromRun); // cumulativo
 
     const pass = Number(stopStep || 0);
 
+    // accumula tempo e pezzi sul passaggio scelto
     const nextStepsTime: Record<number, number> = { ...((row as any).steps_time || {}) };
-    nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + spentSec;
+    nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + extraFromRun;
 
     const nextStepsProg: Record<number, number> = { ...((row as any).steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
+    // qty finita (min tra i passaggi)
     const qtyDone = computeFullyDone(Number((row as any).steps_count || 0), nextStepsProg, 0);
 
+    // log note (solo se presenti) + log operatori (sempre)
     const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
     if (stopNotes && stopNotes.trim()) {
       notesLog.push({
@@ -422,7 +450,16 @@ export default function App() {
         pieces: Number(stopPieces || 0),
       });
     }
+    const opsLog = Array.isArray((row as any).ops_log) ? [...(row as any).ops_log] : [];
+    opsLog.push({
+      ts: new Date().toISOString(),
+      operator: stopOperator || null,
+      step: pass,
+      pieces: Number(stopPieces || 0),
+      duration_sec: extraFromRun,
+    });
 
+    // completamento totale solo se raggiungo la richiesta
     const richiesta = Number((row as any).qty_requested || 0);
     const isCompletedTot = richiesta > 0 && qtyDone >= richiesta;
 
@@ -430,7 +467,8 @@ export default function App() {
       doc(db, 'order_items', row.id!),
       {
         status: isCompletedTot ? 'eseguito' : 'da_iniziare',
-        elapsed_sec: 0,
+        elapsed_sec: totalElapsed,        // <- mantengo il timer cumulativo
+        total_elapsed_sec: totalElapsed,
         timer_start: null,
         last_done_at: serverTimestamp(),
         steps_time: nextStepsTime,
@@ -440,20 +478,23 @@ export default function App() {
         last_notes: stopNotes || null,
         last_step: pass,
         last_pieces: Number(stopPieces || 0),
-        last_duration_sec: spentSec,
+        last_duration_sec: extraFromRun,
         notes_log: notesLog,
+        ops_log: opsLog,
       } as any,
       { merge: true }
     );
 
-    setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
+    // aggiorna UI locale
+    setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: totalElapsed } }));
     setOrders((prev) =>
       prev.map((o: any) =>
         o.id === row.id
           ? {
               ...o,
               status: isCompletedTot ? 'eseguito' : 'da_iniziare',
-              elapsed_sec: 0,
+              elapsed_sec: totalElapsed,
+              total_elapsed_sec: totalElapsed,
               timer_start: null,
               steps_time: nextStepsTime,
               steps_progress: nextStepsProg,
@@ -462,9 +503,10 @@ export default function App() {
               last_notes: stopNotes || null,
               last_step: pass,
               last_pieces: Number(stopPieces || 0),
-              last_duration_sec: spentSec,
+              last_duration_sec: extraFromRun,
               last_done_at: new Date() as any,
               notes_log: notesLog,
+              ops_log: opsLog,
             }
           : o
       ) as any
@@ -492,15 +534,25 @@ export default function App() {
     setOperators((prev) => prev.filter((o: any) => o.id !== (op as any).id));
   };
 
+  // cambia stato (ADMIN)
+  const changeStatus = async (o: any, newStatus: any) => {
+    const patch: any = { status: newStatus, status_changed_at: serverTimestamp() };
+    await updateDoc(doc(db, 'order_items', o.id), patch);
+    setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, ...patch, status_changed_at: new Date() as any } : x)));
+  };
+
+  // NASCONDI (soft delete) ordine
   const hideOrder = async (o: any) => {
     await updateDoc(doc(db, 'order_items', o.id), { hidden: true, deleted_at: serverTimestamp() } as any);
     setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, hidden: true, deleted_at: new Date() as any } : x)));
   };
+  // RIPRISTINA ordine
   const restoreOrder = async (o: any) => {
     await updateDoc(doc(db, 'order_items', o.id), { hidden: false } as any);
     setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, hidden: false } : x)));
   };
 
+  // Inserisci ordine
   const createOrder = async () => {
     const order_number = newOrder.order_number.trim();
     const product_code = newOrder.product_code.trim();
@@ -523,6 +575,8 @@ export default function App() {
       created_at: serverTimestamp(),
       hidden: false,
       notes_log: [],
+      ops_log: [],
+      total_elapsed_sec: 0,
     };
 
     const id = toDocId(row.order_number, row.product_code);
@@ -549,6 +603,10 @@ export default function App() {
       const richiesta = Number((o as any).qty_requested ?? 0);
       const fatta = Number((o as any).qty_done ?? 0);
       const rimanente = Math.max(0, richiesta - fatta);
+      const ops = Array.from(new Set(((((o as any).ops_log ?? []) as any[]).map(x => x.operator).filter(Boolean)))) as string[];
+      const noteStr = ((((o as any).notes_log ?? []) as any[]).map((n) =>
+        `${new Date(n.ts).toLocaleString()}${n.operator ? ` (${n.operator})` : ''}: ${n.text || ''}`.trim()
+      )).join(' | ');
       return {
         Ordine: (o as any).order_number,
         Cliente: (o as any).customer || '',
@@ -558,6 +616,9 @@ export default function App() {
         'Q.ta richiesta': richiesta,
         'Q.ta fatta': fatta,
         'Q.ta rimanente': rimanente,
+        Operatori: ops.join(', '),                       // <- operatori
+        Note: noteStr,                                   // <- note
+        'Tempo totale': secToHMS(Number((o as any).total_elapsed_sec || (o as any).elapsed_sec || 0)),
         Stato: (o as any).hidden ? 'CANCELLATO' : (o as any).status,
       };
     });
@@ -582,6 +643,23 @@ export default function App() {
 
     const ws2 = XLSX.utils.json_to_sheet(aggRows, { header: ['Ordine', 'Riga', 'Passaggio', 'Pezzi', 'Tempo'] });
     XLSX.utils.book_append_sheet(wb, ws2, 'Tempi per passaggio');
+
+    // opzionale: dump attività/operatori dettagliato
+    const activityRows = exportBase.flatMap((o: any) =>
+      (((o as any).ops_log ?? []) as any[]).map((a) => ({
+        Ordine: (o as any).order_number,
+        Riga: (o as any).product_code,
+        TS: new Date(a.ts).toLocaleString(),
+        Operatore: a.operator || '',
+        Passaggio: a.step,
+        Pezzi: a.pieces,
+        'Durata sec': a.duration_sec || 0,
+      }))
+    );
+    if (activityRows.length) {
+      const ws3 = XLSX.utils.json_to_sheet(activityRows, { header: ['Ordine','Riga','TS','Operatore','Passaggio','Pezzi','Durata sec'] });
+      XLSX.utils.book_append_sheet(wb, ws3, 'Attività');
+    }
 
     XLSX.writeFile(wb, `deco-riepilogo-${new Date().toISOString().slice(0,10)}.xlsx`);
   };
@@ -608,6 +686,7 @@ export default function App() {
     );
   };
 
+  // Completati/fasi/parziali – nasconde PRONTI > 7gg
   const completati = useMemo(() => {
     const now = Date.now();
     const week = 7 * 24 * 3600 * 1000;
@@ -631,6 +710,7 @@ export default function App() {
       });
   }, [baseFiltered]);
 
+  // colori/etichette badge completati
   const badgeColor = (s: any, qtyDone?: number) => {
     if (s === 'in_essiccazione') return '#168a3d';
     if (s === 'in_imballaggio') return '#d87f1f';
@@ -730,9 +810,9 @@ export default function App() {
             </thead>
             <tbody>
               {visibleOrders.map((row: any) => {
-                const t = timers[row.id!] || { running: false, startedAt: null, elapsed: Number((row as any).elapsed_sec || 0) };
+                const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
                 const now = Date.now();
-                const _ = tick;
+                const _ = tick; // forza re-render
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
                 const richiesta = Number((row as any).qty_requested ?? 0);
@@ -855,6 +935,7 @@ export default function App() {
 
       {/* STOP MODAL */}
       <Modal open={stopOpen} onClose={() => setStopOpen(false)} title="Concludi lavorazione">
+        {/* RECAP ordine */}
         <div style={{
           display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,
           background:'#10151c',border:'1px solid #223',borderRadius:8,padding:8,marginBottom:8
@@ -971,9 +1052,10 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* ADMIN MODAL */}
+      {/* ADMIN MODAL (operatori + gestione ordini + cambio stato) */}
       <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori & Ordini">
         <div style={{ display: 'grid', gap: 16 }}>
+          {/* Operatori */}
           <div>
             <h4 style={{ margin: '0 0 8px' }}>Operatori</h4>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -995,15 +1077,29 @@ export default function App() {
             </div>
           </div>
 
+          {/* Ordini: stato + nascondi/ripristina */}
           <div>
-            <h4 style={{ margin: '0 0 8px' }}>Ordini (nascondi / ripristina)</h4>
-            <div style={{ maxHeight: 300, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8 }}>
+            <h4 style={{ margin: '0 0 8px' }}>Ordini (stato / nascondi / ripristina)</h4>
+            <div style={{ maxHeight: 360, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8, display:'grid', gap:6 }}>
               {baseFiltered.map((o: any) => (
-                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                  <div style={{ flex: 1, opacity: (o as any).hidden ? 0.6 : 1 }}>
+                <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 8, alignItems: 'center', padding: '4px 0' }}>
+                  <div style={{ opacity: (o as any).hidden ? 0.6 : 1 }}>
                     {(o as any).order_number} · {(o as any).product_code} — <em>{(o as any).hidden ? 'CANCELLATO' : (o as any).status}</em>
                   </div>
-                  {!(o as any).hidden ? (
+                  <select
+                    value={(o as any).status}
+                    onChange={(e) => changeStatus(o, e.target.value)}
+                    title="Cambia stato"
+                  >
+                    <option value="da_iniziare">da_iniziare</option>
+                    <option value="in_esecuzione">in_esecuzione</option>
+                    <option value="pausato">pausato</option>
+                    <option value="in_essiccazione">in_essiccazione</option>
+                    <option value="in_imballaggio">in_imballaggio</option>
+                    <option value="pronti_consegna">pronti_consegna</option>
+                    <option value="eseguito">eseguito</option>
+                  </select>
+                  {!o.hidden ? (
                     <button className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
                   ) : (
                     <button className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
