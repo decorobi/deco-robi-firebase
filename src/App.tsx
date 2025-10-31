@@ -1,4 +1,5 @@
 // App.tsx
+
 import React, { useEffect, useMemo, useState } from 'react';
 import Papa, { ParseResult } from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -243,6 +244,9 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [newOperatorName, setNewOperatorName] = useState('');
 
+  // stato locale per "forza conclusione" in ADMIN (qty per ordine)
+  const [adminForceQty, setAdminForceQty] = useState<Record<string, number | ''>>({});
+
   const [newOrderOpen, setNewOrderOpen] = useState(false);
   const [newOrder, setNewOrder] = useState({
     order_number: '',
@@ -269,16 +273,29 @@ export default function App() {
   const [advanceWeight, setAdvanceWeight] = useState<number | ''>('');
   const [advanceNotes, setAdvanceNotes] = useState<string>('');
 
+  // quando apro la modale avanzamento, precompila dai dati esistenti
   useEffect(() => {
     if (advanceOpen) {
-      setAdvancePhase('in_essiccazione');
-      setAdvancePacked(0);
-      setAdvanceBoxes('');
-      setAdvanceSize('');
-      setAdvanceWeight('');
-      setAdvanceNotes('');
+      const tgt: any = advanceTarget || {};
+      const st: string = tgt.status || 'in_essiccazione';
+      setAdvancePhase(st === 'pronti_consegna' || st === 'in_imballaggio' || st === 'in_essiccazione'
+        ? (st as any) : 'in_essiccazione');
+
+      // precompila pack dati se esistono
+      const pq = Number(tgt.packed_qty || 0);
+      setAdvancePacked(isNaN(pq) ? 0 : pq);
+      setAdvanceBoxes(
+        typeof tgt.packed_boxes === 'number' ? tgt.packed_boxes :
+        tgt.packed_boxes ? Number(tgt.packed_boxes) : ''
+      );
+      setAdvanceSize(tgt.packed_size || '');
+      setAdvanceWeight(
+        typeof tgt.packed_weight === 'number' ? tgt.packed_weight :
+        tgt.packed_weight ? Number(tgt.packed_weight) : ''
+      );
+      setAdvanceNotes(tgt.packed_notes || '');
     }
-  }, [advanceOpen]);
+  }, [advanceOpen, advanceTarget]);
 
   // filtro “Ordini dal …”
   const [filterFrom, setFilterFrom] = useState<string>('');
@@ -584,25 +601,30 @@ export default function App() {
     setStopOpen(false);
   };
 
-  /* --------- NUOVO: Forza conclusione --------- */
-  const forceComplete = async (row: any) => {
+  /* --------- NUOVO: Forza conclusione SOLO in ADMIN --------- */
+  const forceComplete = async (row: any, qtyOverride?: number) => {
     try {
       const richiesta = Number((row as any).qty_requested ?? 0);
-      // prepara nota automatica
+      const qtyFromAdmin = typeof qtyOverride === 'number' && qtyOverride >= 0 ? qtyOverride : null;
+      const qtyFinal =
+        qtyFromAdmin !== null ? qtyFromAdmin :
+        (richiesta > 0 ? richiesta : Number((row as any).qty_done || 0));
+
       const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
       notesLog.push({
         ts: new Date().toISOString(),
         operator: 'SYSTEM',
         text: 'Forza conclusione',
         step: null,
-        pieces: null,
+        pieces: qtyFinal,
       });
+
       const patch: any = {
         status: 'eseguito',
         status_changed_at: serverTimestamp(),
         last_done_at: serverTimestamp(),
         forced_completed: true,
-        qty_done: richiesta > 0 ? richiesta : Number((row as any).qty_done || 0),
+        qty_done: Number(qtyFinal || 0),
         notes_log: notesLog,
       };
       await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
@@ -812,11 +834,12 @@ export default function App() {
       });
   }, [baseFiltered]);
 
+  // nuovi colori badge
   const badgeColor = (s: any, qtyDone?: number) => {
-    if (s === 'in_essiccazione') return '#168a3d';
-    if (s === 'in_imballaggio') return '#d87f1f';
-    if (s === 'pronti_consegna') return '#168a3d';
-    if (s === 'eseguito') return '#555';
+    if (s === 'in_essiccazione') return '#f2c14e';   // giallo
+    if (s === 'in_imballaggio') return '#8b5a2b';    // marrone
+    if (s === 'pronti_consegna') return '#168a3d';   // verde
+    if (s === 'eseguito') return '#555';             // grigio
     if ((qtyDone ?? 0) > 0) return '#555';
     return '#666';
   };
@@ -896,16 +919,6 @@ export default function App() {
             title={hasNotes ? 'Vedi note' : 'Aggiungi/vedi note'}
           >
             Note
-          </button>
-
-          {/* NUOVO: Forza conclusione (giallo) */}
-          <button
-            className="btn"
-            onClick={() => forceComplete(row)}
-            style={{ background: '#f2c14e', color: '#222', border: '1px solid #e0b23e' }}
-            title="Segna come completato e sposta a destra"
-          >
-            Forza conclusione
           </button>
         </div>
       </div>
@@ -1078,15 +1091,7 @@ export default function App() {
                             Note
                           </button>
 
-                          {/* NUOVO: Forza conclusione (giallo) */}
-                          <button
-                            className="btn"
-                            onClick={() => forceComplete(row)}
-                            style={{ background: '#f2c14e', color: '#222', border: '1px solid #e0b23e' }}
-                            title="Segna come completato e sposta a destra"
-                          >
-                            Forza conclusione
-                          </button>
+                          {/* rimosso: Forza conclusione (ora solo in ADMIN) */}
                         </div>
                       </td>
                     </tr>
@@ -1332,33 +1337,61 @@ export default function App() {
             </div>
           </div>
 
-          {/* Ordini: stato + nascondi/ripristina */}
+          {/* Ordini: stato + nascondi/ripristina + NUOVO Forza conclusione */}
           <div>
-            <h4 style={{ margin: '0 0 8px' }}>Ordini (stato / nascondi / ripristina)</h4>
-            <div style={{ maxHeight: 360, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8, display:'grid', gap:6 }}>
+            <h4 style={{ margin: '0 0 8px' }}>Ordini (stato / nascondi / ripristina / forza conclusione)</h4>
+            <div style={{ maxHeight: 420, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8, display:'grid', gap:8 }}>
               {baseFiltered.map((o: any) => (
                 <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 8, alignItems: 'center', padding: '4px 0' }}>
                   <div style={{ opacity: (o as any).hidden ? 0.6 : 1 }}>
                     {(o as any).order_number} · {(o as any).product_code} — <em>{(o as any).hidden ? 'CANCELLATO' : (o as any).status}</em>
                   </div>
-                  <select
-                    value={(o as any).status}
-                    onChange={(e) => changeStatus(o, e.target.value)}
-                    title="Cambia stato"
-                  >
-                    <option value="da_iniziare">da_iniziare</option>
-                    <option value="in_esecuzione">in_esecuzione</option>
-                    <option value="pausato">pausato</option>
-                    <option value="in_essiccazione">in_essiccazione</option>
-                    <option value="in_imballaggio">in_imballaggio</option>
-                    <option value="pronti_consegna">pronti_consegna</option>
-                    <option value="eseguito">eseguito</option>
-                  </select>
-                  {!o.hidden ? (
-                    <button className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
-                  ) : (
-                    <button className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
-                  )}
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent:'flex-end' }}>
+                    <select
+                      value={(o as any).status}
+                      onChange={(e) => changeStatus(o, e.target.value)}
+                      title="Cambia stato"
+                    >
+                      <option value="da_iniziare">da_iniziare</option>
+                      <option value="in_esecuzione">in_esecuzione</option>
+                      <option value="pausato">pausato</option>
+                      <option value="in_essiccazione">in_essiccazione</option>
+                      <option value="in_imballaggio">in_imballaggio</option>
+                      <option value="pronti_consegna">pronti_consegna</option>
+                      <option value="eseguito">eseguito</option>
+                    </select>
+
+                    {!o.hidden ? (
+                      <button className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
+                    ) : (
+                      <button className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
+                    )}
+                  </div>
+
+                  {/* Forza conclusione (solo ADMIN) */}
+                  <div style={{ display:'flex', gap:6, alignItems:'center', gridColumn: '1 / -1' }}>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={adminForceQty[o.id] === '' ? '' : Number(adminForceQty[o.id] ?? '')}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setAdminForceQty(prev => ({ ...prev, [o.id]: v === '' ? '' : Number(v) }));
+                      }}
+                      placeholder="Q.ta completata (facoltativa)"
+                      style={{ width: 200 }}
+                      title="Se vuoto, userà la Q.ta richiesta (se presente)"
+                    />
+                    <button
+                      className="btn"
+                      onClick={() => forceComplete(o, adminForceQty[o.id] === '' || adminForceQty[o.id] === undefined ? undefined : Number(adminForceQty[o.id]))}
+                      style={{ background: '#f2c14e', color: '#222', border: '1px solid #e0b23e' }}
+                      title="Segna come completato con la quantità indicata"
+                    >
+                      Forza conclusione
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1366,6 +1399,43 @@ export default function App() {
               Gli ordini nascosti non compaiono in schermata, ma saranno comunque presenti nello SCARICO EXCEL (Stato: CANCELLATO).
             </div>
           </div>
+        </div>
+      </Modal>
+
+      {/* NUOVO ORDINE */}
+      <Modal open={newOrderOpen} onClose={() => setNewOrderOpen(false)} title="Nuovo ordine">
+        <div style={{ display:'grid', gap:8 }}>
+          <label>
+            <div>Numero ordine *</div>
+            <input value={newOrder.order_number} onChange={(e) => setNewOrder({ ...newOrder, order_number: e.target.value })} />
+          </label>
+          <label>
+            <div>Cliente</div>
+            <input value={newOrder.customer} onChange={(e) => setNewOrder({ ...newOrder, customer: e.target.value })} />
+          </label>
+          <label>
+            <div>Codice prodotto *</div>
+            <input value={newOrder.product_code} onChange={(e) => setNewOrder({ ...newOrder, product_code: e.target.value })} />
+          </label>
+          <label>
+            <div>Descrizione</div>
+            <input value={newOrder.description} onChange={(e) => setNewOrder({ ...newOrder, description: e.target.value })} />
+          </label>
+          <label>
+            <div>ML</div>
+            <input value={newOrder.ml as any} onChange={(e) => setNewOrder({ ...newOrder, ml: e.target.value })} />
+          </label>
+          <label>
+            <div>Q.ta richiesta</div>
+            <input value={newOrder.qty_requested as any} onChange={(e) => setNewOrder({ ...newOrder, qty_requested: e.target.value })} />
+          </label>
+          <label>
+            <div>Numero passaggi</div>
+            <input value={newOrder.steps_count as any} onChange={(e) => setNewOrder({ ...newOrder, steps_count: e.target.value as any })} />
+          </label>
+        </div>
+        <div style={{ textAlign:'right', marginTop:12 }}>
+          <button className="btn btn-primary" onClick={createOrder}>Crea</button>
         </div>
       </Modal>
     </div>
