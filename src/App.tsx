@@ -120,7 +120,7 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
     >
       <div
         className="card"
-        style={{ minWidth: 360, maxWidth: '92vw', padding: 16 }}
+        style={{ minWidth: 320, maxWidth: '92vw', padding: 16 }}
         onClick={(e) => e.stopPropagation()}
       >
         {props.title && <h3 style={{ marginTop: 0 }}>{props.title}</h3>}
@@ -143,7 +143,7 @@ export default function App() {
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
   const [tick, setTick] = useState(0);
 
-  // stile blink + stile "row-card" per le righe a riquadro stondato
+  // stile blink + stile "row-card" per le righe a riquadro stondato + responsive + aside full-height
   useEffect(() => {
     const id = 'extra-style';
     if (!document.getElementById(id)) {
@@ -157,12 +157,46 @@ export default function App() {
         }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
 
-        /* righe come card dentro la tabella */
-        .table { border-collapse: separate !important; border-spacing: 0 10px !important; }
+        /* righe come card dentro la tabella - BORDO PIU' VISIBILE */
+        .table { border-collapse: separate !important; border-spacing: 0 12px !important; }
         .table tbody tr { position: relative; }
         .table tbody tr::before {
-          content: ""; position: absolute; left: -6px; right: -6px; top: -4px; bottom: -4px;
-          border: 1px solid #2b2f3a; border-radius: 12px; background: rgba(255,255,255,0.02); z-index: -1;
+          content: ""; position: absolute; left: -8px; right: -8px; top: -6px; bottom: -6px;
+          border: 2px solid #3a4153; border-radius: 14px; background: rgba(255,255,255,0.03); z-index: -1;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+        }
+        .table tbody tr:hover::before {
+          border-color: #55607a;
+          background: rgba(255,255,255,0.05);
+        }
+
+        /* layout responsive */
+        .top-row { display:flex; gap:12px; align-items:stretch; margin-bottom:12px; flex-wrap:wrap; }
+        .top-row .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .top-row input[type="file"] { width: 100%; max-width: 360px; }
+
+        .layout {
+          display:grid; grid-template-columns: 1fr 280px; gap:16px;
+        }
+
+        /* Aside full-height (desktop) */
+        aside.sticky-aside {
+          position: sticky; top: 12px;
+          height: calc(100vh - 24px); /* 12px top + 12px bottom margini */
+          display: flex; flex-direction: column;
+        }
+
+        @media (max-width: 1024px) {
+          .layout { grid-template-columns: 1fr; }
+          aside.sticky-aside { position: static !important; height: auto; }
+        }
+
+        /* tabella scrollabile su mobile */
+        .table-wrap { overflow-x:auto; -webkit-overflow-scrolling: touch; }
+        .table th, .table td { white-space: nowrap; }
+        @media (max-width: 640px) {
+          .table th, .table td { font-size: 12px; padding: 6px 8px; }
+          .btn { padding: 6px 8px; font-size: 12px; }
         }
       `;
       document.head.appendChild(el);
@@ -200,8 +234,25 @@ export default function App() {
     useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
   const [advancePacked, setAdvancePacked] = useState<number>(0);
 
+  // NUOVI CAMPI per "pronti_consegna"
+  const [advanceBoxes, setAdvanceBoxes] = useState<number | ''>('');
+  const [advanceSize, setAdvanceSize] = useState<string>('');
+  const [advanceWeight, setAdvanceWeight] = useState<number | ''>('');
+  const [advanceNotes, setAdvanceNotes] = useState<string>('');
+
+  useEffect(() => {
+    if (advanceOpen) {
+      setAdvancePhase('in_essiccazione');
+      setAdvancePacked(0);
+      setAdvanceBoxes('');
+      setAdvanceSize('');
+      setAdvanceWeight('');
+      setAdvanceNotes('');
+    }
+  }, [advanceOpen]);
+
   // CRUSCOTTO: filtro “Ordini dal …”
-  const [filterFrom, setFilterFrom] = useState<string>(''); // yyyy-mm-dd
+  const [filterFrom, setFilterFrom] = useState<string>('');
 
   // carica dati
   useEffect(() => {
@@ -214,7 +265,7 @@ export default function App() {
     })();
   }, []);
 
-  // tick timer quando c’è almeno un running
+  // tick timer
   useEffect(() => {
     const anyRunning = Object.values(timers).some((t) => t.running);
     if (!anyRunning) return;
@@ -222,14 +273,12 @@ export default function App() {
     return () => clearInterval(h);
   }, [timers]);
 
-  // helper date created_at
   const createdAtMs = (o: any): number | null => {
     const ca: any = o.created_at;
     if (!ca) return null;
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
   };
 
-  // ordini filtrati per data
   const baseFiltered = useMemo(() => {
     if (!filterFrom) return orders;
     const from = new Date(filterFrom + 'T00:00:00').getTime();
@@ -239,13 +288,11 @@ export default function App() {
     });
   }, [orders, filterFrom]);
 
-  // a sinistra mostro tutto tranne gli "eseguito"
   const visibleOrders = useMemo(
     () => baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status !== 'eseguito'),
     [baseFiltered]
   );
 
-  // KPI sul filtrato visibile
   const kpi = useMemo(() => {
     const byStatus = (st: any) =>
       baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status === st).length;
@@ -256,7 +303,6 @@ export default function App() {
     };
   }, [baseFiltered]);
 
-  // oggi (pezzi/tempo) su TUTTI (anche nascosti)
   const todayAgg = useMemo(() => {
     const { start, end } = getDayBounds(new Date());
     let pezzi = 0;
@@ -314,8 +360,8 @@ export default function App() {
             created_at: serverTimestamp(),
             hidden: false,
             notes_log: [],
-            ops_log: [],             // <- log attività operatori
-            total_elapsed_sec: 0,    // <- timer cumulativo
+            ops_log: [],
+            total_elapsed_sec: 0,
           };
         })
         .filter(Boolean) as any[];
@@ -356,14 +402,14 @@ export default function App() {
     const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
     const now = Date.now();
     const extra = t.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
-    const elapsed = (t.elapsed || 0) + extra; // cumulativo
+    const elapsed = (t.elapsed || 0) + extra;
 
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed } }));
 
     await updateDoc(doc(db, 'order_items', row.id!), {
       status: 'pausato',
       elapsed_sec: elapsed,
-      total_elapsed_sec: elapsed,   // <- salva cumulativo
+      total_elapsed_sec: elapsed,
       timer_start: null,
     } as any);
 
@@ -406,7 +452,6 @@ export default function App() {
     if (!stopTarget) return;
     const row: any = stopTarget;
 
-    // VALIDAZIONE
     const stepsCount = Number((row as any).steps_count || 0);
     if (!stopStep || stopStep < 1 || (stepsCount > 0 && stopStep > stepsCount)) {
       alert('Seleziona un passaggio valido.');
@@ -425,21 +470,18 @@ export default function App() {
     const now = Date.now();
     const extraFromRun = t?.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
     const prevElapsed = baseElapsedOf(row);
-    const totalElapsed = Math.max(0, prevElapsed + extraFromRun); // cumulativo
+    const totalElapsed = Math.max(0, prevElapsed + extraFromRun);
 
     const pass = Number(stopStep || 0);
 
-    // accumula tempo e pezzi sul passaggio scelto
     const nextStepsTime: Record<number, number> = { ...((row as any).steps_time || {}) };
     nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + extraFromRun;
 
     const nextStepsProg: Record<number, number> = { ...((row as any).steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
-    // qty finita (min tra i passaggi)
     const qtyDone = computeFullyDone(Number((row as any).steps_count || 0), nextStepsProg, 0);
 
-    // log note (solo se presenti) + log operatori (sempre)
     const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
     if (stopNotes && stopNotes.trim()) {
       notesLog.push({
@@ -459,7 +501,6 @@ export default function App() {
       duration_sec: extraFromRun,
     });
 
-    // completamento totale solo se raggiungo la richiesta
     const richiesta = Number((row as any).qty_requested || 0);
     const isCompletedTot = richiesta > 0 && qtyDone >= richiesta;
 
@@ -467,7 +508,7 @@ export default function App() {
       doc(db, 'order_items', row.id!),
       {
         status: isCompletedTot ? 'eseguito' : 'da_iniziare',
-        elapsed_sec: totalElapsed,        // <- mantengo il timer cumulativo
+        elapsed_sec: totalElapsed,
         total_elapsed_sec: totalElapsed,
         timer_start: null,
         last_done_at: serverTimestamp(),
@@ -485,7 +526,6 @@ export default function App() {
       { merge: true }
     );
 
-    // aggiorna UI locale
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: totalElapsed } }));
     setOrders((prev) =>
       prev.map((o: any) =>
@@ -534,25 +574,21 @@ export default function App() {
     setOperators((prev) => prev.filter((o: any) => o.id !== (op as any).id));
   };
 
-  // cambia stato (ADMIN)
   const changeStatus = async (o: any, newStatus: any) => {
     const patch: any = { status: newStatus, status_changed_at: serverTimestamp() };
     await updateDoc(doc(db, 'order_items', o.id), patch);
     setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, ...patch, status_changed_at: new Date() as any } : x)));
   };
 
-  // NASCONDI (soft delete) ordine
   const hideOrder = async (o: any) => {
     await updateDoc(doc(db, 'order_items', o.id), { hidden: true, deleted_at: serverTimestamp() } as any);
     setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, hidden: true, deleted_at: new Date() as any } : x)));
   };
-  // RIPRISTINA ordine
   const restoreOrder = async (o: any) => {
     await updateDoc(doc(db, 'order_items', o.id), { hidden: false } as any);
     setOrders((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, hidden: false } : x)));
   };
 
-  // Inserisci ordine
   const createOrder = async () => {
     const order_number = newOrder.order_number.trim();
     const product_code = newOrder.product_code.trim();
@@ -616,10 +652,15 @@ export default function App() {
         'Q.ta richiesta': richiesta,
         'Q.ta fatta': fatta,
         'Q.ta rimanente': rimanente,
-        Operatori: ops.join(', '),                       // <- operatori
-        Note: noteStr,                                   // <- note
+        Operatori: ops.join(', '),
+        Note: noteStr,
         'Tempo totale': secToHMS(Number((o as any).total_elapsed_sec || (o as any).elapsed_sec || 0)),
         Stato: (o as any).hidden ? 'CANCELLATO' : (o as any).status,
+        'Imballati (pz)': (o as any).packed_qty ?? '',
+        'Scatole/Pallets': (o as any).packed_boxes ?? '',
+        'Misura': (o as any).packed_size ?? '',
+        'Peso (kg)': (o as any).packed_weight ?? '',
+        'Note consegna': (o as any).packed_notes ?? '',
       };
     });
 
@@ -644,7 +685,6 @@ export default function App() {
     const ws2 = XLSX.utils.json_to_sheet(aggRows, { header: ['Ordine', 'Riga', 'Passaggio', 'Pezzi', 'Tempo'] });
     XLSX.utils.book_append_sheet(wb, ws2, 'Tempi per passaggio');
 
-    // opzionale: dump attività/operatori dettagliato
     const activityRows = exportBase.flatMap((o: any) =>
       (((o as any).ops_log ?? []) as any[]).map((a) => ({
         Ordine: (o as any).order_number,
@@ -686,7 +726,6 @@ export default function App() {
     );
   };
 
-  // Completati/fasi/parziali – nasconde PRONTI > 7gg
   const completati = useMemo(() => {
     const now = Date.now();
     const week = 7 * 24 * 3600 * 1000;
@@ -710,7 +749,6 @@ export default function App() {
       });
   }, [baseFiltered]);
 
-  // colori/etichette badge completati
   const badgeColor = (s: any, qtyDone?: number) => {
     if (s === 'in_essiccazione') return '#168a3d';
     if (s === 'in_imballaggio') return '#d87f1f';
@@ -732,24 +770,15 @@ export default function App() {
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
-      {/* TOP ROW: controlli + CRUSCOTTO espanso */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          alignItems: 'stretch',
-          marginBottom: 12,
-          flexWrap: 'nowrap'
-        }}
-      >
-        {/* controlli */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{ maxWidth: 320 }}>
+      {/* TOP ROW */}
+      <div className="top-row">
+        <div className="controls">
+          <div style={{ minWidth: 220, maxWidth: 360, width: '100%' }}>
             <input
               type="file"
               accept=".csv,.txt"
               onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])}
-              style={{ width: 320 }}
+              style={{ width: '100%' }}
             />
           </div>
           <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
@@ -764,7 +793,7 @@ export default function App() {
             border: '1px solid #2b2f3a',
             borderRadius: 8,
             padding: 12,
-            minWidth: 300
+            minWidth: 280
           }}
         >
           <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 18 }}>Cruscotto</h3>
@@ -790,7 +819,7 @@ export default function App() {
       </div>
 
       {/* TABELLA + COMPLETATI */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
+      <div className="layout">
         {/* TABELLA */}
         <div className="table-wrap">
           <table className="table" style={{ width: '100%' }}>
@@ -812,7 +841,7 @@ export default function App() {
               {visibleOrders.map((row: any) => {
                 const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
                 const now = Date.now();
-                const _ = tick; // forza re-render
+                const _ = tick;
                 const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
                 const richiesta = Number((row as any).qty_requested ?? 0);
@@ -900,12 +929,22 @@ export default function App() {
           </table>
         </div>
 
-        {/* COMPLETATI */}
-        <aside style={{ border: '1px solid #2b2f3a', borderRadius: 8, padding: 12, height: 'fit-content', position: 'sticky', top: 12 }}>
+        {/* COMPLETATI - ASIDE FULL HEIGHT */}
+        <aside
+          className="sticky-aside"
+          style={{
+            border: '1px solid #2b2f3a',
+            borderRadius: 8,
+            padding: 12,
+            alignSelf: 'start',
+            // height, sticky e flex sono gestiti dal CSS .sticky-aside
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
             <h3 style={{ margin: 0, fontSize: 18 }}>Completati</h3>
           </div>
-          <div style={{ maxHeight: 260, overflow: 'auto', display: 'grid', gap: 6 }}>
+          {/* Lista scrollabile che riempie l'altezza restante */}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'grid', gap: 6 }}>
             {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
             {completati.map((o: any) => (
               <button
@@ -935,7 +974,6 @@ export default function App() {
 
       {/* STOP MODAL */}
       <Modal open={stopOpen} onClose={() => setStopOpen(false)} title="Concludi lavorazione">
-        {/* RECAP ordine */}
         <div style={{
           display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,
           background:'#10151c',border:'1px solid #223',borderRadius:8,padding:8,marginBottom:8
@@ -1001,7 +1039,7 @@ export default function App() {
               </div>
               <div>{n.text}</div>
             </div>
-          ))}
+          ))} 
         </div>
       </Modal>
 
@@ -1019,16 +1057,63 @@ export default function App() {
           </label>
 
           {advancePhase === 'pronti_consegna' && (
-            <label>
-              <div>Quanti pezzi imballati?</div>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={advancePacked}
-                onChange={(e) => setAdvancePacked(Number(e.target.value || 0))}
-              />
-            </label>
+            <div style={{ display:'grid', gap:8 }}>
+              <label>
+                <div>Quanti pezzi imballati? *</div>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={advancePacked}
+                  onChange={(e) => setAdvancePacked(Number(e.target.value || 0))}
+                  required
+                />
+              </label>
+              <label>
+                <div>Nr. scatole / pallets</div>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={advanceBoxes === '' ? '' : Number(advanceBoxes)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAdvanceBoxes(v === '' ? '' : Number(v));
+                  }}
+                  placeholder="Es. 4"
+                />
+              </label>
+              <label>
+                <div>Misura</div>
+                <input
+                  value={advanceSize}
+                  onChange={(e) => setAdvanceSize(e.target.value)}
+                  placeholder="Es. 80x120 cm"
+                />
+              </label>
+              <label>
+                <div>Peso (kg)</div>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={advanceWeight === '' ? '' : Number(advanceWeight)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAdvanceWeight(v === '' ? '' : Number(v));
+                  }}
+                  placeholder="Es. 120"
+                />
+              </label>
+              <label>
+                <div>Note</div>
+                <input
+                  value={advanceNotes}
+                  onChange={(e) => setAdvanceNotes(e.target.value)}
+                  placeholder="Note per spedizione/consegna"
+                />
+              </label>
+            </div>
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
@@ -1042,6 +1127,10 @@ export default function App() {
                 return;
               }
               patch.packed_qty = Number(advancePacked);
+              if (advanceBoxes !== '') patch.packed_boxes = Number(advanceBoxes);
+              if (advanceSize.trim()) patch.packed_size = advanceSize.trim();
+              if (advanceWeight !== '') patch.packed_weight = Number(advanceWeight);
+              if (advanceNotes.trim()) patch.packed_notes = advanceNotes.trim();
             }
             await updateDoc(doc(db, 'order_items', id), patch);
             setOrders((prev) =>
@@ -1052,13 +1141,13 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* ADMIN MODAL (operatori + gestione ordini + cambio stato) */}
+      {/* ADMIN MODAL */}
       <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori & Ordini">
         <div style={{ display: 'grid', gap: 16 }}>
           {/* Operatori */}
           <div>
             <h4 style={{ margin: '0 0 8px' }}>Operatori</h4>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input
                 placeholder="Nuovo operatore"
                 value={newOperatorName}
