@@ -133,6 +133,18 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
   );
 }
 
+/* -------------------- Mobile helpers -------------------- */
+
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= breakpoint : false));
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= breakpoint);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 /* -------------------- Component -------------------- */
 
 type TimerState = { running: boolean; startedAt: number | null; elapsed: number };
@@ -142,8 +154,9 @@ export default function App() {
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [timers, setTimers] = useState<Record<string, TimerState>>({});
   const [tick, setTick] = useState(0);
+  const isMobile = useIsMobile();
 
-  // stile blink + stile "row-card" per le righe a riquadro stondato + responsive + aside full-height
+  // stile + responsive + aside full-height + card mobile
   useEffect(() => {
     const id = 'extra-style';
     if (!document.getElementById(id)) {
@@ -157,7 +170,7 @@ export default function App() {
         }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
 
-        /* righe come card dentro la tabella - BORDO PIU' VISIBILE */
+        /* righe-card marcate */
         .table { border-collapse: separate !important; border-spacing: 0 12px !important; }
         .table tbody tr { position: relative; }
         .table tbody tr::before {
@@ -165,24 +178,19 @@ export default function App() {
           border: 2px solid #3a4153; border-radius: 14px; background: rgba(255,255,255,0.03); z-index: -1;
           box-shadow: 0 2px 10px rgba(0,0,0,0.25);
         }
-        .table tbody tr:hover::before {
-          border-color: #55607a;
-          background: rgba(255,255,255,0.05);
-        }
+        .table tbody tr:hover::before { border-color: #55607a; background: rgba(255,255,255,0.05); }
 
         /* layout responsive */
         .top-row { display:flex; gap:12px; align-items:stretch; margin-bottom:12px; flex-wrap:wrap; }
         .top-row .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
         .top-row input[type="file"] { width: 100%; max-width: 360px; }
 
-        .layout {
-          display:grid; grid-template-columns: 1fr 280px; gap:16px;
-        }
+        .layout { display:grid; grid-template-columns: 1fr 280px; gap:16px; }
 
-        /* Aside full-height (desktop) */
+        /* Aside full-height desktop */
         aside.sticky-aside {
           position: sticky; top: 12px;
-          height: calc(100vh - 24px); /* 12px top + 12px bottom margini */
+          height: calc(100vh - 24px);
           display: flex; flex-direction: column;
         }
 
@@ -191,19 +199,40 @@ export default function App() {
           aside.sticky-aside { position: static !important; height: auto; }
         }
 
-        /* tabella scrollabile su mobile */
         .table-wrap { overflow-x:auto; -webkit-overflow-scrolling: touch; }
         .table th, .table td { white-space: nowrap; }
+
+        .btn { min-height: 40px; }
+
+        /* mobile: card */
         @media (max-width: 640px) {
-          .table th, .table td { font-size: 12px; padding: 6px 8px; }
-          .btn { padding: 6px 8px; font-size: 12px; }
+          .table-wrap { display:none; }
+          .mobile-list { display:grid; gap:12px; }
+          .mobile-card {
+            border: 2px solid #3a4153; border-radius: 14px; background: rgba(255,255,255,0.03);
+            padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+            display: grid; gap: 8px;
+          }
+          .mobile-card .row {
+            display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center;
+          }
+          .mobile-card .meta {
+            display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:6px;
+            font-size: 13px; opacity:.95;
+          }
+          .mobile-card .meta div{ background:#111722; border:1px solid #2b2f3a; border-radius:8px; padding:6px 8px;}
+          .mobile-card .actions { display:flex; flex-wrap:wrap; gap:6px; }
+          .btn { padding: 10px 12px; font-size: 14px; min-height:44px; }
+        }
+        @media (min-width: 641px) {
+          .mobile-list { display:none; }
         }
       `;
       document.head.appendChild(el);
     }
   }, []);
 
-  // MODALS
+  /* -------------------- State & Modals -------------------- */
   const [stopOpen, setStopOpen] = useState(false);
   const [stopTarget, setStopTarget] = useState<OrderItem | null>(null);
   const [stopOperator, setStopOperator] = useState<string>('');
@@ -234,7 +263,7 @@ export default function App() {
     useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
   const [advancePacked, setAdvancePacked] = useState<number>(0);
 
-  // NUOVI CAMPI per "pronti_consegna"
+  // campi pronti_consegna
   const [advanceBoxes, setAdvanceBoxes] = useState<number | ''>('');
   const [advanceSize, setAdvanceSize] = useState<string>('');
   const [advanceWeight, setAdvanceWeight] = useState<number | ''>('');
@@ -251,7 +280,7 @@ export default function App() {
     }
   }, [advanceOpen]);
 
-  // CRUSCOTTO: filtro “Ordini dal …”
+  // filtro “Ordini dal …”
   const [filterFrom, setFilterFrom] = useState<string>('');
 
   // carica dati
@@ -555,6 +584,40 @@ export default function App() {
     setStopOpen(false);
   };
 
+  /* --------- NUOVO: Forza conclusione --------- */
+  const forceComplete = async (row: any) => {
+    try {
+      const richiesta = Number((row as any).qty_requested ?? 0);
+      // prepara nota automatica
+      const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
+      notesLog.push({
+        ts: new Date().toISOString(),
+        operator: 'SYSTEM',
+        text: 'Forza conclusione',
+        step: null,
+        pieces: null,
+      });
+      const patch: any = {
+        status: 'eseguito',
+        status_changed_at: serverTimestamp(),
+        last_done_at: serverTimestamp(),
+        forced_completed: true,
+        qty_done: richiesta > 0 ? richiesta : Number((row as any).qty_done || 0),
+        notes_log: notesLog,
+      };
+      await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
+      setOrders((prev) =>
+        prev.map((o: any) =>
+          o.id === row.id
+            ? { ...o, ...patch, status_changed_at: new Date() as any, last_done_at: new Date() as any }
+            : o
+        ) as any
+      );
+    } catch (err: any) {
+      alert('Errore forza conclusione: ' + err.message);
+    }
+  };
+
   /* ------------------- ADMIN & GESTIONE ------------------- */
   const addOperator = async () => {
     const name = newOperatorName.trim();
@@ -704,7 +767,7 @@ export default function App() {
     XLSX.writeFile(wb, `deco-riepilogo-${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
-  /* ------------------- Render ------------------- */
+  /* ------------------- Render helpers ------------------- */
 
   const renderPassaggiCell = (row: any) => {
     const stats = aggregateStepStats(row);
@@ -766,12 +829,97 @@ export default function App() {
     return 'COMPLETATO';
   };
 
+  /* ------------------- Mobile Card ------------------- */
+  const MobileOrderCard = ({ row }: { row: any }) => {
+    const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
+    const now = Date.now();
+    const _ = tick;
+    const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
+
+    const richiesta = Number((row as any).qty_requested ?? 0);
+    const fatta = Number((row as any).qty_done ?? 0);
+    const rimanente = Math.max(0, richiesta - fatta);
+    const hasNotes = Array.isArray((row as any).notes_log) && (row as any).notes_log.length > 0;
+
+    return (
+      <div className="mobile-card">
+        <div className="row">
+          <div>
+            <div style={{ fontWeight: 700 }}>{(row as any).order_number} · {(row as any).product_code}</div>
+            <div style={{ opacity: 0.9, fontSize: 13 }}>
+              {(row as any).customer || '—'} • {(row as any).description || '—'}
+            </div>
+          </div>
+          <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+            {secToHMS(elapsed)}{(row as any).status === 'pausato' ? ' ⏸️' : ''}
+          </div>
+        </div>
+
+        <div className="meta">
+          <div><strong>Rich.</strong> {richiesta || '—'}</div>
+          <div><strong>Fatta</strong> {fatta}</div>
+          <div><strong>Riman.</strong> {rimanente}</div>
+          <div><strong>Passi</strong> {aggregateStepStats(row).length || 0}</div>
+        </div>
+
+        <div className="actions">
+          <button
+            className="btn btn-primary"
+            disabled={(row as any).status !== 'da_iniziare'}
+            onClick={() => onStart(row)}
+          >
+            Start
+          </button>
+
+          {(row as any).status === 'in_esecuzione' && (
+            <button className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>
+          )}
+
+          <button
+            className={`btn btn-success ${(row as any).status === 'pausato' ? 'blink' : ''}`}
+            disabled={(row as any).status !== 'pausato'}
+            onClick={() => onResume(row)}
+          >
+            Riprendi
+          </button>
+
+          <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
+
+          <button
+            className="btn"
+            onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
+            style={{
+              padding: '8px 10px',
+              opacity: hasNotes ? 1 : 0.7,
+              border: hasNotes ? '1px solid #888' : '1px dashed #666'
+            }}
+            title={hasNotes ? 'Vedi note' : 'Aggiungi/vedi note'}
+          >
+            Note
+          </button>
+
+          {/* NUOVO: Forza conclusione (giallo) */}
+          <button
+            className="btn"
+            onClick={() => forceComplete(row)}
+            style={{ background: '#f2c14e', color: '#222', border: '1px solid #e0b23e' }}
+            title="Segna come completato e sposta a destra"
+          >
+            Forza conclusione
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  /* ------------------- Render ------------------- */
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
 
       {/* TOP ROW */}
       <div className="top-row">
+        {/* controlli */}
         <div className="controls">
           <div style={{ minWidth: 220, maxWidth: 360, width: '100%' }}>
             <input
@@ -818,118 +966,138 @@ export default function App() {
         </div>
       </div>
 
-      {/* TABELLA + COMPLETATI */}
+      {/* LAYOUT */}
       <div className="layout">
-        {/* TABELLA */}
-        <div className="table-wrap">
-          <table className="table" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>Ordine</th>
-                <th>Cliente</th>
-                <th>Codice</th>
-                <th>Descrizione</th>
-                <th>Q.ta rich.</th>
-                <th>Q.ta fatta</th>
-                <th>Rimanenti</th>
-                <th>Passaggi</th>
-                <th>Timer</th>
-                <th>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleOrders.map((row: any) => {
-                const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
-                const now = Date.now();
-                const _ = tick;
-                const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
+        {/* LISTA ORDINI */}
+        <div>
+          {/* mobile cards */}
+          <div className="mobile-list">
+            {visibleOrders.map((row: any) => (
+              <MobileOrderCard key={row.id} row={row} />
+            ))}
+          </div>
 
-                const richiesta = Number((row as any).qty_requested ?? 0);
-                const fatta = Number((row as any).qty_done ?? 0);
-                const rimanente = Math.max(0, richiesta - fatta);
+          {/* tabella per >=641px */}
+          <div className="table-wrap">
+            <table className="table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>Ordine</th>
+                  <th>Cliente</th>
+                  <th>Codice</th>
+                  <th>Descrizione</th>
+                  <th>Q.ta rich.</th>
+                  <th>Q.ta fatta</th>
+                  <th>Rimanenti</th>
+                  <th>Passaggi</th>
+                  <th>Timer</th>
+                  <th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleOrders.map((row: any) => {
+                  const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
+                  const now = Date.now();
+                  const _ = tick;
+                  const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
 
-                const hasNotes = Array.isArray((row as any).notes_log) && (row as any).notes_log.length > 0;
+                  const richiesta = Number((row as any).qty_requested ?? 0);
+                  const fatta = Number((row as any).qty_done ?? 0);
+                  const rimanente = Math.max(0, richiesta - fatta);
 
-                return (
-                  <tr key={row.id}>
-                    <td><strong>{(row as any).order_number}</strong></td>
-                    <td>{(row as any).customer || ''}</td>
-                    <td>{(row as any).product_code}</td>
-                    <td>
-                      <div
-                        title={(row as any).description || ''}
-                        style={{
-                          maxWidth: 220,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          opacity: (row as any).description ? 1 : 0.6
-                        }}
-                      >
-                        {(row as any).description || '—'}
-                      </div>
-                    </td>
-                    <td>{richiesta || ''}</td>
-                    <td>{fatta}</td>
-                    <td>{rimanente}</td>
-                    <td>{renderPassaggiCell(row)}</td>
-                    <td>
-                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{secToHMS(elapsed)}</span>
-                      {(row as any).status === 'pausato' && (
-                        <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 6, background: '#666', color: 'white' }}>
-                          Pausa
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <button
-                          className="btn btn-primary"
-                          disabled={(row as any).status !== 'da_iniziare'}
-                          onClick={() => onStart(row)}
-                        >
-                          Start
-                        </button>
+                  const hasNotes = Array.isArray((row as any).notes_log) && (row as any).notes_log.length > 0;
 
-                        {(row as any).status === 'in_esecuzione' && (
-                          <button className="btn btn-warning" onClick={() => onPause(row)}>
-                            Pausa
-                          </button>
-                        )}
-
-                        <button
-                          className={`btn btn-success ${(row as any).status === 'pausato' ? 'blink' : ''}`}
-                          disabled={(row as any).status !== 'pausato'}
-                          onClick={() => onResume(row)}
-                        >
-                          Riprendi
-                        </button>
-
-                        <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
-
-                        <button
-                          className="btn"
-                          onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
+                  return (
+                    <tr key={row.id}>
+                      <td><strong>{(row as any).order_number}</strong></td>
+                      <td>{(row as any).customer || ''}</td>
+                      <td>{(row as any).product_code}</td>
+                      <td>
+                        <div
+                          title={(row as any).description || ''}
                           style={{
-                            padding: '4px 8px',
-                            fontSize: 12,
-                            opacity: hasNotes ? 1 : 0.6,
-                            border: hasNotes ? '1px solid #888' : '1px dashed #666'
+                            maxWidth: 220,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            opacity: (row as any).description ? 1 : 0.6
                           }}
-                          title={hasNotes ? 'Vedi note' : 'Aggiungi/vedi note'}
                         >
-                          Note
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          {(row as any).description || '—'}
+                        </div>
+                      </td>
+                      <td>{richiesta || ''}</td>
+                      <td>{fatta}</td>
+                      <td>{rimanente}</td>
+                      <td>{renderPassaggiCell(row)}</td>
+                      <td>
+                        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{secToHMS(elapsed)}</span>
+                        {(row as any).status === 'pausato' && (
+                          <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 6, background: '#666', color: 'white' }}>
+                            Pausa
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button
+                            className="btn btn-primary"
+                            disabled={(row as any).status !== 'da_iniziare'}
+                            onClick={() => onStart(row)}
+                          >
+                            Start
+                          </button>
+
+                          {(row as any).status === 'in_esecuzione' && (
+                            <button className="btn btn-warning" onClick={() => onPause(row)}>
+                              Pausa
+                            </button>
+                          )}
+
+                          <button
+                            className={`btn btn-success ${(row as any).status === 'pausato' ? 'blink' : ''}`}
+                            disabled={(row as any).status !== 'pausato'}
+                            onClick={() => onResume(row)}
+                          >
+                            Riprendi
+                          </button>
+
+                          <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
+
+                          <button
+                            className="btn"
+                            onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
+                            style={{
+                              padding: '4px 8px',
+                              fontSize: 12,
+                              opacity: hasNotes ? 1 : 0.6,
+                              border: hasNotes ? '1px solid #888' : '1px dashed #666'
+                            }}
+                            title={hasNotes ? 'Vedi note' : 'Aggiungi/vedi note'}
+                          >
+                            Note
+                          </button>
+
+                          {/* NUOVO: Forza conclusione (giallo) */}
+                          <button
+                            className="btn"
+                            onClick={() => forceComplete(row)}
+                            style={{ background: '#f2c14e', color: '#222', border: '1px solid #e0b23e' }}
+                            title="Segna come completato e sposta a destra"
+                          >
+                            Forza conclusione
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* COMPLETATI - ASIDE FULL HEIGHT */}
+        {/* COMPLETATI - Aside full height */}
         <aside
           className="sticky-aside"
           style={{
@@ -937,13 +1105,11 @@ export default function App() {
             borderRadius: 8,
             padding: 12,
             alignSelf: 'start',
-            // height, sticky e flex sono gestiti dal CSS .sticky-aside
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
             <h3 style={{ margin: 0, fontSize: 18 }}>Completati</h3>
           </div>
-          {/* Lista scrollabile che riempie l'altezza restante */}
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'grid', gap: 6 }}>
             {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
             {completati.map((o: any) => (
@@ -1035,7 +1201,7 @@ export default function App() {
           {(((notesTarget as any)?.notes_log) ?? []).slice().reverse().map((n: any, idx: number) => (
             <div key={idx} style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.8 }}>
-                {new Date(n.ts).toLocaleString()} • {n.operator || '—'} • Pass. {n.step} • {n.pieces} pz
+                {new Date(n.ts).toLocaleString()} • {n.operator || '—'} • {n.step ? `Pass. ${n.step} • ` : ''}{n.pieces ? `${n.pieces} pz` : ''}
               </div>
               <div>{n.text}</div>
             </div>
