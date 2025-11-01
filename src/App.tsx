@@ -8,6 +8,7 @@ import { db, ensureAnonAuth } from './lib/firebaseClient';
 import {
   collection,
   getDocs,
+  getDoc,
   doc,
   setDoc,
   updateDoc,
@@ -172,7 +173,7 @@ export default function App() {
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
 
         /* righe-card marcate */
-        .table { border-collapse: separate !important; border-spacing: 0 12px !important; }
+        .table { border-collapse: separate !important; border-spacing: 0 12px !important; width: 100%; }
         .table tbody tr { position: relative; }
         .table tbody tr::before {
           content: ""; position: absolute; left: -8px; right: -8px; top: -6px; bottom: -6px;
@@ -202,8 +203,11 @@ export default function App() {
 
         .table-wrap { overflow-x:auto; -webkit-overflow-scrolling: touch; }
         .table th, .table td { white-space: nowrap; }
-
         .btn { min-height: 40px; }
+
+        /* colonne: riduco la larghezza di "Codice" e allargo "Descrizione" */
+        .col-code { width: 1%; white-space: nowrap; }
+        .col-desc { max-width: 520px; }
 
         /* mobile: card */
         @media (max-width: 640px) {
@@ -244,7 +248,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [newOperatorName, setNewOperatorName] = useState('');
 
-  // stato locale per "forza conclusione" in ADMIN (qty per ordine)
+  // Forza conclusione (qty per ordine in ADMIN)
   const [adminForceQty, setAdminForceQty] = useState<Record<string, number | ''>>({});
 
   const [newOrderOpen, setNewOrderOpen] = useState(false);
@@ -273,32 +277,9 @@ export default function App() {
   const [advanceWeight, setAdvanceWeight] = useState<number | ''>('');
   const [advanceNotes, setAdvanceNotes] = useState<string>('');
 
-  // quando apro la modale avanzamento, precompila dai dati esistenti
-  useEffect(() => {
-    if (advanceOpen) {
-      const tgt: any = advanceTarget || {};
-      const st: string = tgt.status || 'in_essiccazione';
-      setAdvancePhase(st === 'pronti_consegna' || st === 'in_imballaggio' || st === 'in_essiccazione'
-        ? (st as any) : 'in_essiccazione');
-
-      // precompila pack dati se esistono
-      const pq = Number(tgt.packed_qty || 0);
-      setAdvancePacked(isNaN(pq) ? 0 : pq);
-      setAdvanceBoxes(
-        typeof tgt.packed_boxes === 'number' ? tgt.packed_boxes :
-        tgt.packed_boxes ? Number(tgt.packed_boxes) : ''
-      );
-      setAdvanceSize(tgt.packed_size || '');
-      setAdvanceWeight(
-        typeof tgt.packed_weight === 'number' ? tgt.packed_weight :
-        tgt.packed_weight ? Number(tgt.packed_weight) : ''
-      );
-      setAdvanceNotes(tgt.packed_notes || '');
-    }
-  }, [advanceOpen, advanceTarget]);
-
-  // filtro “Ordini dal …”
+  // Filtro cruscotto
   const [filterFrom, setFilterFrom] = useState<string>('');
+  const [filterCustomer, setFilterCustomer] = useState<string>('');
 
   // carica dati
   useEffect(() => {
@@ -310,6 +291,16 @@ export default function App() {
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
     })();
   }, []);
+
+  // clienti unici per select filtro
+  const customers = useMemo(() => {
+    const vals = new Set<string>();
+    orders.forEach((o: any) => {
+      const c = String(o.customer || '').trim();
+      if (c) vals.add(c);
+    });
+    return Array.from(vals).sort((a, b) => a.localeCompare(b));
+  }, [orders]);
 
   // tick timer
   useEffect(() => {
@@ -325,14 +316,21 @@ export default function App() {
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
   };
 
+  // filtro base: data + cliente
   const baseFiltered = useMemo(() => {
-    if (!filterFrom) return orders;
-    const from = new Date(filterFrom + 'T00:00:00').getTime();
-    return orders.filter((o) => {
-      const ts = createdAtMs(o as any);
-      return ts ? ts >= from : false;
-    });
-  }, [orders, filterFrom]);
+    let list = orders;
+    if (filterFrom) {
+      const from = new Date(filterFrom + 'T00:00:00').getTime();
+      list = list.filter((o) => {
+        const ts = createdAtMs(o as any);
+        return ts ? ts >= from : false;
+      });
+    }
+    if (filterCustomer) {
+      list = list.filter((o: any) => (o.customer || '') === filterCustomer);
+    }
+    return list;
+  }, [orders, filterFrom, filterCustomer]);
 
   const visibleOrders = useMemo(
     () => baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status !== 'eseguito'),
@@ -378,18 +376,40 @@ export default function App() {
       });
       if (!parsed || parsed.length === 0) throw new Error('Il file CSV sembra vuoto o senza intestazioni.');
 
-      const batch = parsed
-        .map((r) => {
-          const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
-          const customer = pick(r, ['cliente']);
-          const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod']);
-          const description = pick(r, ['descrizione', 'descr', 'descrizione prodotto', 'desc', 'descr.']);
-          const mlVal = pick(r, ['ml']);
-          const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta']);
-          const qty_in_oven = pick(r, ['inforno', 'in forno']);
-          const steps = pick(r, ['passaggi', 'n passaggi', 'passi']);
-          if (!order_number || !product_code) return null;
-          return {
+      let created = 0;
+      let updated = 0;
+
+      for (const r of parsed) {
+        const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
+        const customer = pick(r, ['cliente']);
+        const product_code = pick(r, ['codice prodotto', 'codice', 'prodotto', 'codice prod']);
+        const description = pick(r, ['descrizione', 'descr', 'descrizione prodotto', 'desc', 'descr.']);
+        const mlVal = pick(r, ['ml']);
+        const qty_requested = pick(r, ['quantita inserita', 'quantità inserita', 'quantita', 'qty richiesta', 'qta richiesta']);
+        const qty_in_oven = pick(r, ['inforno', 'in forno']);
+        const steps = pick(r, ['passaggi', 'n passaggi', 'passi']);
+
+        if (!order_number || !product_code) continue;
+
+        const id = toDocId(String(order_number), String(product_code));
+        const ref = doc(db, 'order_items', id);
+        const snap = await getDoc(ref);
+
+        if (snap.exists()) {
+          // aggiorno solo anagrafiche, non tocco stato/tempi/log
+          const patch: any = {};
+          if (customer !== undefined) patch.customer = String(customer);
+          if (description !== undefined) patch.description = String(description);
+          if (mlVal !== undefined) patch.ml = parseNumberIT(mlVal);
+          if (qty_requested !== undefined) patch.qty_requested = parseNumberIT(qty_requested);
+          if (qty_in_oven !== undefined) patch.qty_in_oven = parseNumberIT(qty_in_oven);
+          if (steps !== undefined) patch.steps_count = Number(parseNumberIT(steps) || 0);
+          if (Object.keys(patch).length > 0) {
+            await setDoc(ref, patch, { merge: true });
+            updated++;
+          }
+        } else {
+          const row: any = {
             order_number: String(order_number),
             customer: customer ? String(customer) : '',
             product_code: String(product_code),
@@ -409,16 +429,15 @@ export default function App() {
             ops_log: [],
             total_elapsed_sec: 0,
           };
-        })
-        .filter(Boolean) as any[];
-
-      for (const row of batch) {
-        const id = toDocId(row.order_number, row.product_code);
-        await setDoc(doc(db, 'order_items', id), row, { merge: true });
+          await setDoc(ref, row, { merge: true });
+          created++;
+        }
       }
+
+      // reload
       const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')));
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
-      alert(`Import completato (${batch.length} righe).`);
+      alert(`Import completato. Creati: ${created}, Aggiornati: ${updated}.`);
     } catch (err: any) {
       console.error(err);
       alert('Errore import: ' + err.message);
@@ -601,7 +620,7 @@ export default function App() {
     setStopOpen(false);
   };
 
-  /* --------- NUOVO: Forza conclusione SOLO in ADMIN --------- */
+  /* --------- Forza conclusione (ADMIN) --------- */
   const forceComplete = async (row: any, qtyOverride?: number) => {
     try {
       const richiesta = Number((row as any).qty_requested ?? 0);
@@ -620,14 +639,17 @@ export default function App() {
       });
 
       const patch: any = {
-        status: 'eseguito',
+        status: 'eseguito',                         // => sposta a destra
         status_changed_at: serverTimestamp(),
         last_done_at: serverTimestamp(),
         forced_completed: true,
-        qty_done: Number(qtyFinal || 0),
+        qty_done: Number(qtyFinal || 0),            // es. 90/180
         notes_log: notesLog,
       };
+
       await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
+
+      // aggiorno stato locale: sparisce a sinistra, compare a destra
       setOrders((prev) =>
         prev.map((o: any) =>
           o.id === row.id
@@ -834,7 +856,7 @@ export default function App() {
       });
   }, [baseFiltered]);
 
-  // nuovi colori badge
+  // colori badge
   const badgeColor = (s: any, qtyDone?: number) => {
     if (s === 'in_essiccazione') return '#f2c14e';   // giallo
     if (s === 'in_imballaggio') return '#8b5a2b';    // marrone
@@ -958,10 +980,20 @@ export default function App() {
           }}
         >
           <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 18 }}>Cruscotto</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(140px,1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(140px,1fr))', gap: 12 }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <div style={{ fontSize: 12, opacity: 0.8 }}>Ordini dal…</div>
               <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+            </label>
+
+            <label style={{ display: 'grid', gap: 4 }}>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>Cliente</div>
+              <select value={filterCustomer} onChange={(e) => setFilterCustomer(e.target.value)}>
+                <option value="">— tutti —</option>
+                {customers.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </label>
 
             <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 12, display:'grid', gap:4, alignContent:'start' }}>
@@ -992,13 +1024,13 @@ export default function App() {
 
           {/* tabella per >=641px */}
           <div className="table-wrap">
-            <table className="table" style={{ width: '100%' }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th>Ordine</th>
                   <th>Cliente</th>
-                  <th>Codice</th>
-                  <th>Descrizione</th>
+                  <th className="col-code">Codice</th>
+                  <th className="col-desc">Descrizione</th>
                   <th>Q.ta rich.</th>
                   <th>Q.ta fatta</th>
                   <th>Rimanenti</th>
@@ -1024,12 +1056,12 @@ export default function App() {
                     <tr key={row.id}>
                       <td><strong>{(row as any).order_number}</strong></td>
                       <td>{(row as any).customer || ''}</td>
-                      <td>{(row as any).product_code}</td>
-                      <td>
+                      <td className="col-code">{(row as any).product_code}</td>
+                      <td className="col-desc">
                         <div
                           title={(row as any).description || ''}
                           style={{
-                            maxWidth: 220,
+                            maxWidth: 520,
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -1091,7 +1123,7 @@ export default function App() {
                             Note
                           </button>
 
-                          {/* rimosso: Forza conclusione (ora solo in ADMIN) */}
+                          {/* Forza conclusione è solo in ADMIN */}
                         </div>
                       </td>
                     </tr>
@@ -1337,7 +1369,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Ordini: stato + nascondi/ripristina + NUOVO Forza conclusione */}
+          {/* Ordini */}
           <div>
             <h4 style={{ margin: '0 0 8px' }}>Ordini (stato / nascondi / ripristina / forza conclusione)</h4>
             <div style={{ maxHeight: 420, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8, display:'grid', gap:8 }}>
