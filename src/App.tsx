@@ -158,76 +158,41 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const isMobile = useIsMobile();
 
-  // stile compatto + header sticky + colonna codice/descrizione compatta
+  // stile + layout
   useEffect(() => {
     const id = 'extra-style';
     if (!document.getElementById(id)) {
       const el = document.createElement('style');
       el.id = id;
       el.innerHTML = `
-        @keyframes blinkPulse {
-          0% { transform: scale(1); filter: brightness(1); }
-          50% { transform: scale(1.03); filter: brightness(1.25); }
-          100% { transform: scale(1); filter: brightness(1); }
-        }
+        @keyframes blinkPulse { 0%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.03);filter:brightness(1.25)}100%{transform:scale(1);filter:brightness(1)} }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
-
         .table { border-collapse: separate !important; border-spacing: 0 8px !important; width: 100%; }
         .table tbody tr { position: relative; }
-        .table tbody tr::before {
-          content: ""; position: absolute; left: -6px; right: -6px; top: -4px; bottom: -4px;
-          border: 1px solid #3a4153; border-radius: 12px; background: rgba(255,255,255,0.03); z-index: -1;
-          box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-        }
-        .table tbody tr:hover::before { border-color: #55607a; background: rgba(255,255,255,0.05); }
+        .table tbody tr::before { content:""; position:absolute; left:-6px; right:-6px; top:-4px; bottom:-4px; border:1px solid #3a4153; border-radius:12px; background:rgba(255,255,255,0.03); z-index:-1; box-shadow:0 1px 6px rgba(0,0,0,0.25); }
+        .table tbody tr:hover::before { border-color:#55607a; background:rgba(255,255,255,0.05); }
         .table thead th { position: sticky; top: 0; z-index: 2; background: #0f1622; }
-
         .top-row { display:flex; gap:8px; align-items:stretch; margin-bottom:8px; flex-wrap:wrap; }
         .top-row .controls { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
         .top-row input[type="file"] { width: 100%; max-width: 320px; }
-
         .layout { display:grid; grid-template-columns: 1fr 260px; gap:12px; }
-
-        aside.sticky-aside {
-          position: sticky; top: 8px;
-          height: calc(100vh - 16px);
-          display: flex; flex-direction: column;
-        }
-
-        @media (max-width: 1024px) {
-          .layout { grid-template-columns: 1fr; }
-          aside.sticky-aside { position: static !important; height: auto; }
-        }
-
+        aside.sticky-aside { position: sticky; top: 8px; height: calc(100vh - 16px); display: flex; flex-direction: column; }
+        @media (max-width: 1024px) { .layout { grid-template-columns: 1fr; } aside.sticky-aside { position: static !important; height: auto; } }
         .table-wrap { overflow-x:auto; -webkit-overflow-scrolling: touch; }
         .table th, .table td { white-space: nowrap; padding: 8px 8px; }
-
         .btn { min-height: 32px; padding: 6px 10px; font-size: 13px; border-radius: 8px; }
-
         .cell-code-desc { max-width: 520px; }
         .cell-code-desc .code { font-weight: 600; }
-        .cell-code-desc .desc {
-          opacity: 0.95; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-
+        .cell-code-desc .desc { opacity:.95; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         @media (max-width: 640px) {
           .table-wrap { display:none; }
           .mobile-list { display:grid; gap:8px; }
-          .mobile-card {
-            border: 1px solid #3a4153; border-radius: 12px; background: rgba(255,255,255,0.03);
-            padding: 10px; box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-            display: grid; gap: 8px;
-          }
-          .mobile-card .row {
-            display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center;
-          }
-          .mobile-card .meta {
-            display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:6px;
-            font-size: 13px; opacity:.95;
-          }
+          .mobile-card { border:1px solid #3a4153; border-radius:12px; background:rgba(255,255,255,0.03); padding:10px; box-shadow:0 1px 6px rgba(0,0,0,0.25); display:grid; gap:8px; }
+          .mobile-card .row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
+          .mobile-card .meta { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; font-size:13px; opacity:.95; }
           .mobile-card .meta div{ background:#111722; border:1px solid #2b2f3a; border-radius:8px; padding:6px 8px;}
           .mobile-card .actions { display:flex; flex-wrap:wrap; gap:6px; }
-          .btn { padding: 8px 10px; font-size: 13px; min-height:34px; }
+          .btn { padding:8px 10px; font-size:13px; min-height:34px; }
         }
         @media (min-width: 641px) { .mobile-list { display:none; } }
       `;
@@ -538,90 +503,92 @@ export default function App() {
     }
 
     const t = timers[row.id!];
-    const now = Date.now();
-    const extraFromRun = t?.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
-    const prevElapsed = baseElapsedOf(row);
-    const totalElapsed = Math.max(0, prevElapsed + extraFromRun);
+    the_now: {
+      const now = Date.now();
+      const extraFromRun = t?.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
+      const prevElapsed = baseElapsedOf(row);
+      const totalElapsed = Math.max(0, prevElapsed + extraFromRun);
 
-    const pass = Number(stopStep || 0);
+      const pass = Number(stopStep || 0);
 
-    const nextStepsTime: Record<number, number> = { ...((row as any).steps_time || {}) };
-    nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + extraFromRun;
+      const nextStepsTime: Record<number, number> = { ...((row as any).steps_time || {}) };
+      nextStepsTime[pass] = (nextStepsTime[pass] ?? 0) + extraFromRun;
 
-    const nextStepsProg: Record<number, number> = { ...((row as any).steps_progress || {}) };
-    nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
+      const nextStepsProg: Record<number, number> = { ...((row as any).steps_progress || {}) };
+      nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + (Number(stopPieces || 0));
 
-    const qtyDone = computeFullyDone(Number((row as any).steps_count || 0), nextStepsProg, 0);
+      const qtyDone = computeFullyDone(Number((row as any).steps_count || 0), nextStepsProg, 0);
 
-    const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
-    if (stopNotes && stopNotes.trim()) {
-      notesLog.push({
+      const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
+      if (stopNotes && stopNotes.trim()) {
+        notesLog.push({
+          ts: new Date().toISOString(),
+          operator: stopOperator || null,
+          text: stopNotes.trim(),
+          step: pass,
+          pieces: Number(stopPieces || 0),
+        });
+      }
+      const opsLog = Array.isArray((row as any).ops_log) ? [...(row as any).ops_log] : [];
+      opsLog.push({
         ts: new Date().toISOString(),
         operator: stopOperator || null,
-        text: stopNotes.trim(),
         step: pass,
         pieces: Number(stopPieces || 0),
+        duration_sec: extraFromRun,
       });
+
+      const richiesta = Number((row as any).qty_requested || 0);
+      const isCompletedTot = richiesta > 0 && qtyDone >= richiesta;
+
+      await setDoc(
+        doc(db, 'order_items', row.id!),
+        {
+          status: isCompletedTot ? 'eseguito' : 'da_iniziare',
+          elapsed_sec: totalElapsed,
+          total_elapsed_sec: totalElapsed,
+          timer_start: null,
+          last_done_at: serverTimestamp(),
+          steps_time: nextStepsTime,
+          steps_progress: nextStepsProg,
+          qty_done: qtyDone,
+          last_operator: stopOperator || null,
+          last_notes: stopNotes || null,
+          last_step: pass,
+          last_pieces: Number(stopPieces || 0),
+          last_duration_sec: extraFromRun,
+          notes_log: notesLog,
+          ops_log: opsLog,
+        } as any,
+        { merge: true }
+      );
+
+      setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: totalElapsed } }));
+      setOrders((prev) =>
+        prev.map((o: any) =>
+          o.id === row.id
+            ? {
+                ...o,
+                status: isCompletedTot ? 'eseguito' : 'da_iniziare',
+                elapsed_sec: totalElapsed,
+                total_elapsed_sec: totalElapsed,
+                timer_start: null,
+                steps_time: nextStepsTime,
+                steps_progress: nextStepsProg,
+                qty_done: qtyDone,
+                last_operator: stopOperator || null,
+                last_notes: stopNotes || null,
+                last_step: pass,
+                last_pieces: Number(stopPieces || 0),
+                last_duration_sec: extraFromRun,
+                last_done_at: new Date() as any,
+                notes_log: notesLog,
+                ops_log: opsLog,
+              }
+            : o
+        ) as any
+      );
     }
-    const opsLog = Array.isArray((row as any).ops_log) ? [...(row as any).ops_log] : [];
-    opsLog.push({
-      ts: new Date().toISOString(),
-      operator: stopOperator || null,
-      step: pass,
-      pieces: Number(stopPieces || 0),
-      duration_sec: extraFromRun,
-    });
-
-    const richiesta = Number((row as any).qty_requested || 0);
-    const isCompletedTot = richiesta > 0 && qtyDone >= richiesta;
-
-    await setDoc(
-      doc(db, 'order_items', row.id!),
-      {
-        status: isCompletedTot ? 'eseguito' : 'da_iniziare',
-        elapsed_sec: totalElapsed,
-        total_elapsed_sec: totalElapsed,
-        timer_start: null,
-        last_done_at: serverTimestamp(),
-        steps_time: nextStepsTime,
-        steps_progress: nextStepsProg,
-        qty_done: qtyDone,
-        last_operator: stopOperator || null,
-        last_notes: stopNotes || null,
-        last_step: pass,
-        last_pieces: Number(stopPieces || 0),
-        last_duration_sec: extraFromRun,
-        notes_log: notesLog,
-        ops_log: opsLog,
-      } as any,
-      { merge: true }
-    );
-
-    setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: totalElapsed } }));
-    setOrders((prev) =>
-      prev.map((o: any) =>
-        o.id === row.id
-          ? {
-              ...o,
-              status: isCompletedTot ? 'eseguito' : 'da_iniziare',
-              elapsed_sec: totalElapsed,
-              total_elapsed_sec: totalElapsed,
-              timer_start: null,
-              steps_time: nextStepsTime,
-              steps_progress: nextStepsProg,
-              qty_done: qtyDone,
-              last_operator: stopOperator || null,
-              last_notes: stopNotes || null,
-              last_step: pass,
-              last_pieces: Number(stopPieces || 0),
-              last_duration_sec: extraFromRun,
-              last_done_at: new Date() as any,
-              notes_log: notesLog,
-              ops_log: opsLog,
-            }
-          : o
-      ) as any
-    );
 
     setStopOpen(false);
   };
@@ -709,13 +676,11 @@ export default function App() {
 
       await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
 
-      // aggiorna locale
       setOrders((prev) =>
         prev.map((o: any) =>
           o.id === row.id ? { ...o, ...patch, status_changed_at: new Date() as any } : o
         ) as any
       );
-      // ferma eventuale timer locale
       setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
     } catch (err: any) {
       alert('Errore azzera ordine: ' + err.message);
@@ -933,18 +898,28 @@ export default function App() {
     return 'COMPLETATO';
   };
 
-  /* ------------------- RESET campi modal avanzamento quando si cambia ordine ------------------- */
-  useEffect(() => {
-    if (advanceOpen && advanceTarget) {
-      // resetta SEMPRE i campi per evitare di “sentire” i dati del precedente
-      setAdvancePhase('in_essiccazione');
-      setAdvancePacked(0);
-      setAdvanceBoxes('');
-      setAdvanceSize('');
-      setAdvanceWeight('');
-      setAdvanceNotes('');
-    }
-  }, [advanceOpen, advanceTarget]);
+  /* ------------------- Prefill campi modal AVANZA quando selezioni un ordine ------------------- */
+  const openAdvanceFor = (o: any) => {
+    setAdvanceTarget(o);
+    // Prefill dalla riga selezionata
+    const currentPhase: any =
+      ['in_essiccazione','in_imballaggio','pronti_consegna'].includes(o.status) ? o.status : 'in_essiccazione';
+    setAdvancePhase(currentPhase);
+    setAdvancePacked(Number(o.packed_qty || 0));
+    setAdvanceBoxes(
+      o.packed_boxes === null || o.packed_boxes === undefined || o.packed_boxes === ''
+        ? ''
+        : Number(o.packed_boxes)
+    );
+    setAdvanceSize(o.packed_size || '');
+    setAdvanceWeight(
+      o.packed_weight === null || o.packed_weight === undefined || o.packed_weight === ''
+        ? ''
+        : Number(o.packed_weight)
+    );
+    setAdvanceNotes(o.packed_notes || '');
+    setAdvanceOpen(true);
+  };
 
   /* ------------------- Mobile Card ------------------- */
   const MobileOrderCard = ({ row }: { row: any }) => {
@@ -1211,17 +1186,7 @@ export default function App() {
               <button
                 key={(o as any).id}
                 className="btn"
-                onClick={() => {
-                  setAdvanceTarget(o as any);
-                  // reset valori del modal ogni volta che si cambia selezione
-                  setAdvancePhase('in_essiccazione');
-                  setAdvancePacked(0);
-                  setAdvanceBoxes('');
-                  setAdvanceSize('');
-                  setAdvanceWeight('');
-                  setAdvanceNotes('');
-                  setAdvanceOpen(true);
-                }}
+                onClick={() => openAdvanceFor(o)}
                 style={{
                   justifyContent: 'space-between',
                   background: badgeColor((o as any).status, (o as any).qty_done as any),
@@ -1396,6 +1361,7 @@ export default function App() {
             if (!advanceTarget) return;
             const id = (advanceTarget as any).id!;
             const patch: any = { status: advancePhase, status_changed_at: serverTimestamp() };
+
             if (advancePhase === 'pronti_consegna') {
               if (!advancePacked || advancePacked <= 0) {
                 alert('Inserisci i pezzi imballati per passare a PRONTI PER LA CONSEGNA');
@@ -1407,17 +1373,24 @@ export default function App() {
               if (advanceWeight !== '') patch.packed_weight = Number(advanceWeight);
               if (advanceNotes.trim()) patch.packed_notes = advanceNotes.trim();
             } else {
-              // se non è "pronti", azzera i campi imballo non pertinenti
+              // se non è "pronti", puliamo i campi imballo
               patch.packed_qty = 0;
               patch.packed_boxes = null;
               patch.packed_size = null;
               patch.packed_weight = null;
               patch.packed_notes = null;
             }
+
             await updateDoc(doc(db, 'order_items', id), patch);
+
+            // aggiorna subito in memoria locale (così al riaprire vedi i dati)
             setOrders((prev) =>
               prev.map((o: any) => (o.id === id ? { ...o, ...patch, status_changed_at: new Date() as any } : o))
             );
+
+            // mantieni il target aggiornato (se resta aperto)
+            setAdvanceTarget((prev: any) => prev && prev.id === id ? { ...prev, ...patch } : prev);
+
             setAdvanceOpen(false);
           }}>Salva</button>
         </div>
