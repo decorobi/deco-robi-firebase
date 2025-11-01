@@ -158,7 +158,7 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const isMobile = useIsMobile();
 
-  // stile più compatto + header sticky + colonna codice/descrizione compatta
+  // stile compatto + header sticky + colonna codice/descrizione compatta
   useEffect(() => {
     const id = 'extra-style';
     if (!document.getElementById(id)) {
@@ -172,9 +172,6 @@ export default function App() {
         }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
 
-        :root { --card-pad: 6px; }
-
-        /* righe-card più compatte */
         .table { border-collapse: separate !important; border-spacing: 0 8px !important; width: 100%; }
         .table tbody tr { position: relative; }
         .table tbody tr::before {
@@ -183,14 +180,8 @@ export default function App() {
           box-shadow: 0 1px 6px rgba(0,0,0,0.25);
         }
         .table tbody tr:hover::before { border-color: #55607a; background: rgba(255,255,255,0.05); }
+        .table thead th { position: sticky; top: 0; z-index: 2; background: #0f1622; }
 
-        /* header sticky */
-        .table thead th {
-          position: sticky; top: 0; z-index: 2;
-          background: #0f1622;
-        }
-
-        /* layout più stretto verso sinistra */
         .top-row { display:flex; gap:8px; align-items:stretch; margin-bottom:8px; flex-wrap:wrap; }
         .top-row .controls { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
         .top-row input[type="file"] { width: 100%; max-width: 320px; }
@@ -211,21 +202,14 @@ export default function App() {
         .table-wrap { overflow-x:auto; -webkit-overflow-scrolling: touch; }
         .table th, .table td { white-space: nowrap; padding: 8px 8px; }
 
-        /* Bottoni compatti */
         .btn { min-height: 32px; padding: 6px 10px; font-size: 13px; border-radius: 8px; }
-        .btn.btn-danger { padding: 6px 10px; }
-        .btn.btn-warning { padding: 6px 10px; }
-        .btn.btn-primary { padding: 6px 10px; }
-        .btn.btn-success { padding: 6px 10px; }
 
-        /* colonna compattata: Codice sopra, descrizione sotto */
         .cell-code-desc { max-width: 520px; }
         .cell-code-desc .code { font-weight: 600; }
         .cell-code-desc .desc {
           opacity: 0.95; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
 
-        /* mobile */
         @media (max-width: 640px) {
           .table-wrap { display:none; }
           .mobile-list { display:grid; gap:8px; }
@@ -245,9 +229,7 @@ export default function App() {
           .mobile-card .actions { display:flex; flex-wrap:wrap; gap:6px; }
           .btn { padding: 8px 10px; font-size: 13px; min-height:34px; }
         }
-        @media (min-width: 641px) {
-          .mobile-list { display:none; }
-        }
+        @media (min-width: 641px) { .mobile-list { display:none; } }
       `;
       document.head.appendChild(el);
     }
@@ -348,7 +330,7 @@ export default function App() {
     return list;
   }, [orders, filterFrom, filterCustomer]);
 
-  // 👇 NEW: lista sinistra SOLO stati "di linea", e mai fully-done
+  // SINISTRA: solo stati "di linea" e non già completamente fatti
   const visibleOrders = useMemo(() => {
     return baseFiltered.filter((o: any) => {
       if ((o as any).hidden) return false;
@@ -685,22 +667,58 @@ export default function App() {
     }
   };
 
-  /* --------- Azzera quantità fatta (ADMIN) --------- */
-  const resetQtyDone = async (row: any) => {
+  /* --------- AZZERA COMPLETAMENTE (ADMIN) --------- */
+  const resetOrder = async (row: any) => {
     try {
       const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
       notesLog.push({
         ts: new Date().toISOString(),
         operator: 'SYSTEM',
-        text: 'Azzera quantità fatta',
+        text: 'Azzera ordine (reset completo)',
         step: null,
         pieces: 0,
       });
-      const patch: any = { qty_done: 0, notes_log: notesLog };
+
+      const patch: any = {
+        status: 'da_iniziare',
+        status_changed_at: serverTimestamp(),
+        elapsed_sec: 0,
+        total_elapsed_sec: 0,
+        timer_start: null,
+
+        qty_done: 0,
+        steps_progress: {},
+        steps_time: {},
+
+        packed_qty: 0,
+        packed_boxes: null,
+        packed_size: null,
+        packed_weight: null,
+        packed_notes: null,
+
+        last_operator: null,
+        last_notes: null,
+        last_step: null,
+        last_pieces: null,
+        last_duration_sec: null,
+        last_done_at: null,
+
+        notes_log: notesLog,
+        forced_completed: false,
+      };
+
       await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
-      setOrders((prev) => prev.map((o: any) => (o.id === row.id ? { ...o, ...patch } : o)) as any);
+
+      // aggiorna locale
+      setOrders((prev) =>
+        prev.map((o: any) =>
+          o.id === row.id ? { ...o, ...patch, status_changed_at: new Date() as any } : o
+        ) as any
+      );
+      // ferma eventuale timer locale
+      setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
     } catch (err: any) {
-      alert('Errore azzera quantità: ' + err.message);
+      alert('Errore azzera ordine: ' + err.message);
     }
   };
 
@@ -898,12 +916,11 @@ export default function App() {
       });
   }, [baseFiltered]);
 
-  // colori badge
   const badgeColor = (s: any, qtyDone?: number) => {
-    if (s === 'in_essiccazione') return '#f2c14e';   // giallo
-    if (s === 'in_imballaggio') return '#8b5a2b';    // marrone
-    if (s === 'pronti_consegna') return '#168a3d';   // verde
-    if (s === 'eseguito') return '#555';             // grigio
+    if (s === 'in_essiccazione') return '#f2c14e';
+    if (s === 'in_imballaggio') return '#8b5a2b';
+    if (s === 'pronti_consegna') return '#168a3d';
+    if (s === 'eseguito') return '#555';
     if ((qtyDone ?? 0) > 0) return '#555';
     return '#666';
   };
@@ -915,6 +932,19 @@ export default function App() {
     if ((qtyDone ?? 0) > 0) return 'PARZIALE';
     return 'COMPLETATO';
   };
+
+  /* ------------------- RESET campi modal avanzamento quando si cambia ordine ------------------- */
+  useEffect(() => {
+    if (advanceOpen && advanceTarget) {
+      // resetta SEMPRE i campi per evitare di “sentire” i dati del precedente
+      setAdvancePhase('in_essiccazione');
+      setAdvancePacked(0);
+      setAdvanceBoxes('');
+      setAdvanceSize('');
+      setAdvanceWeight('');
+      setAdvanceNotes('');
+    }
+  }, [advanceOpen, advanceTarget]);
 
   /* ------------------- Mobile Card ------------------- */
   const MobileOrderCard = ({ row }: { row: any }) => {
@@ -1181,7 +1211,17 @@ export default function App() {
               <button
                 key={(o as any).id}
                 className="btn"
-                onClick={() => { setAdvanceTarget(o as any); setAdvanceOpen(true); }}
+                onClick={() => {
+                  setAdvanceTarget(o as any);
+                  // reset valori del modal ogni volta che si cambia selezione
+                  setAdvancePhase('in_essiccazione');
+                  setAdvancePacked(0);
+                  setAdvanceBoxes('');
+                  setAdvanceSize('');
+                  setAdvanceWeight('');
+                  setAdvanceNotes('');
+                  setAdvanceOpen(true);
+                }}
                 style={{
                   justifyContent: 'space-between',
                   background: badgeColor((o as any).status, (o as any).qty_done as any),
@@ -1277,7 +1317,11 @@ export default function App() {
       {/* AVANZA FASE */}
       <Modal open={advanceOpen} onClose={() => setAdvanceOpen(false)} title="Avanza fase ordine completato">
         <div style={{ display: 'grid', gap: 8 }}>
-          <div><strong>{(advanceTarget as any)?.order_number}</strong> · {(advanceTarget as any)?.product_code}</div>
+          <div>
+            <strong>{(advanceTarget as any)?.order_number}</strong> · {(advanceTarget as any)?.product_code}
+            <div style={{ opacity: .9, fontSize: 13, marginTop: 2 }}>{(advanceTarget as any)?.description || '—'}</div>
+          </div>
+
           <label>
             <div>Quale passaggio vuoi eseguire ora?</div>
             <select value={advancePhase} onChange={(e) => setAdvancePhase(e.target.value as any)}>
@@ -1311,7 +1355,7 @@ export default function App() {
                     const v = e.target.value;
                     setAdvanceBoxes(v === '' ? '' : Number(v));
                   }}
-                  placeholder="Es. 4"
+                  placeholder="Es. 2"
                 />
               </label>
               <label>
@@ -1362,6 +1406,13 @@ export default function App() {
               if (advanceSize.trim()) patch.packed_size = advanceSize.trim();
               if (advanceWeight !== '') patch.packed_weight = Number(advanceWeight);
               if (advanceNotes.trim()) patch.packed_notes = advanceNotes.trim();
+            } else {
+              // se non è "pronti", azzera i campi imballo non pertinenti
+              patch.packed_qty = 0;
+              patch.packed_boxes = null;
+              patch.packed_size = null;
+              patch.packed_weight = null;
+              patch.packed_notes = null;
             }
             await updateDoc(doc(db, 'order_items', id), patch);
             setOrders((prev) =>
@@ -1399,7 +1450,7 @@ export default function App() {
 
           {/* Ordini */}
           <div>
-            <h4 style={{ margin: '0 0 6px' }}>Ordini (stato / nascondi / ripristina / forza conclusione / azzera q.ta)</h4>
+            <h4 style={{ margin: '0 0 6px' }}>Ordini (stato / nascondi / ripristina / forza conclusione / azzera)</h4>
             <div style={{ maxHeight: 420, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 6, display:'grid', gap:8 }}>
               {baseFiltered.map((o: any) => (
                 <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 6, alignItems: 'center', padding: '4px 0' }}>
@@ -1454,10 +1505,10 @@ export default function App() {
 
                     <button
                       className="btn"
-                      onClick={() => resetQtyDone(o)}
-                      title="Azzera solo la Q.ta fatta (non cancella log)"
+                      onClick={() => resetOrder(o)}
+                      title="Azzera completamente: quantità, passaggi, tempi, imballo e stato a 'da_iniziare'"
                     >
-                      Azzera Q.ta fatta
+                      Azzera ordine
                     </button>
                   </div>
                 </div>
