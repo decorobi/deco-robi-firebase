@@ -187,7 +187,7 @@ export default function App() {
         /* header sticky */
         .table thead th {
           position: sticky; top: 0; z-index: 2;
-          background: #0f1622; /* compatibile con tema */
+          background: #0f1622;
         }
 
         /* layout più stretto verso sinistra */
@@ -348,10 +348,20 @@ export default function App() {
     return list;
   }, [orders, filterFrom, filterCustomer]);
 
-  const visibleOrders = useMemo(
-    () => baseFiltered.filter((o: any) => !((o as any).hidden) && (o as any).status !== 'eseguito'),
-    [baseFiltered]
-  );
+  // 👇 NEW: lista sinistra SOLO stati "di linea", e mai fully-done
+  const visibleOrders = useMemo(() => {
+    return baseFiltered.filter((o: any) => {
+      if ((o as any).hidden) return false;
+      const st = (o as any).status;
+      const req = Number((o as any).qty_requested || 0);
+      const done = Number((o as any).qty_done || 0);
+      const fullyDone = req > 0 && done >= req;
+      const isLeft = ['da_iniziare', 'in_esecuzione', 'pausato'].includes(st);
+      if (!isLeft) return false;
+      if (fullyDone) return false;
+      return true;
+    });
+  }, [baseFiltered]);
 
   const kpi = useMemo(() => {
     const byStatus = (st: any) =>
