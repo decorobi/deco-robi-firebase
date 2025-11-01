@@ -122,12 +122,12 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
     >
       <div
         className="card"
-        style={{ minWidth: 320, maxWidth: '92vw', padding: 16 }}
+        style={{ minWidth: 320, maxWidth: '92vw', padding: 12 }}
         onClick={(e) => e.stopPropagation()}
       >
-        {props.title && <h3 style={{ marginTop: 0 }}>{props.title}</h3>}
+        {props.title && <h3 style={{ marginTop: 0, marginBottom: 8 }}>{props.title}</h3>}
         {props.children}
-        <div style={{ textAlign: 'right', marginTop: 12 }}>
+        <div style={{ textAlign: 'right', marginTop: 10 }}>
           <button className="btn btn-secondary" onClick={props.onClose}>Chiudi</button>
         </div>
       </div>
@@ -158,7 +158,7 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const isMobile = useIsMobile();
 
-  // stile + responsive + aside full-height + card mobile
+  // stile più compatto + header sticky + colonna codice/descrizione compatta
   useEffect(() => {
     const id = 'extra-style';
     if (!document.getElementById(id)) {
@@ -172,27 +172,34 @@ export default function App() {
         }
         .blink { animation: blinkPulse 1s ease-in-out infinite; }
 
-        /* righe-card marcate */
-        .table { border-collapse: separate !important; border-spacing: 0 12px !important; width: 100%; }
+        :root { --card-pad: 6px; }
+
+        /* righe-card più compatte */
+        .table { border-collapse: separate !important; border-spacing: 0 8px !important; width: 100%; }
         .table tbody tr { position: relative; }
         .table tbody tr::before {
-          content: ""; position: absolute; left: -8px; right: -8px; top: -6px; bottom: -6px;
-          border: 2px solid #3a4153; border-radius: 14px; background: rgba(255,255,255,0.03); z-index: -1;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+          content: ""; position: absolute; left: -6px; right: -6px; top: -4px; bottom: -4px;
+          border: 1px solid #3a4153; border-radius: 12px; background: rgba(255,255,255,0.03); z-index: -1;
+          box-shadow: 0 1px 6px rgba(0,0,0,0.25);
         }
         .table tbody tr:hover::before { border-color: #55607a; background: rgba(255,255,255,0.05); }
 
-        /* layout responsive */
-        .top-row { display:flex; gap:12px; align-items:stretch; margin-bottom:12px; flex-wrap:wrap; }
-        .top-row .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        .top-row input[type="file"] { width: 100%; max-width: 360px; }
+        /* header sticky */
+        .table thead th {
+          position: sticky; top: 0; z-index: 2;
+          background: #0f1622; /* compatibile con tema */
+        }
 
-        .layout { display:grid; grid-template-columns: 1fr 280px; gap:16px; }
+        /* layout più stretto verso sinistra */
+        .top-row { display:flex; gap:8px; align-items:stretch; margin-bottom:8px; flex-wrap:wrap; }
+        .top-row .controls { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+        .top-row input[type="file"] { width: 100%; max-width: 320px; }
 
-        /* Aside full-height desktop */
+        .layout { display:grid; grid-template-columns: 1fr 260px; gap:12px; }
+
         aside.sticky-aside {
-          position: sticky; top: 12px;
-          height: calc(100vh - 24px);
+          position: sticky; top: 8px;
+          height: calc(100vh - 16px);
           display: flex; flex-direction: column;
         }
 
@@ -202,20 +209,29 @@ export default function App() {
         }
 
         .table-wrap { overflow-x:auto; -webkit-overflow-scrolling: touch; }
-        .table th, .table td { white-space: nowrap; }
-        .btn { min-height: 40px; }
+        .table th, .table td { white-space: nowrap; padding: 8px 8px; }
 
-        /* colonne: riduco la larghezza di "Codice" e allargo "Descrizione" */
-        .col-code { width: 1%; white-space: nowrap; }
-        .col-desc { max-width: 520px; }
+        /* Bottoni compatti */
+        .btn { min-height: 32px; padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+        .btn.btn-danger { padding: 6px 10px; }
+        .btn.btn-warning { padding: 6px 10px; }
+        .btn.btn-primary { padding: 6px 10px; }
+        .btn.btn-success { padding: 6px 10px; }
 
-        /* mobile: card */
+        /* colonna compattata: Codice sopra, descrizione sotto */
+        .cell-code-desc { max-width: 520px; }
+        .cell-code-desc .code { font-weight: 600; }
+        .cell-code-desc .desc {
+          opacity: 0.95; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* mobile */
         @media (max-width: 640px) {
           .table-wrap { display:none; }
-          .mobile-list { display:grid; gap:12px; }
+          .mobile-list { display:grid; gap:8px; }
           .mobile-card {
-            border: 2px solid #3a4153; border-radius: 14px; background: rgba(255,255,255,0.03);
-            padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+            border: 1px solid #3a4153; border-radius: 12px; background: rgba(255,255,255,0.03);
+            padding: 10px; box-shadow: 0 1px 6px rgba(0,0,0,0.25);
             display: grid; gap: 8px;
           }
           .mobile-card .row {
@@ -227,7 +243,7 @@ export default function App() {
           }
           .mobile-card .meta div{ background:#111722; border:1px solid #2b2f3a; border-radius:8px; padding:6px 8px;}
           .mobile-card .actions { display:flex; flex-wrap:wrap; gap:6px; }
-          .btn { padding: 10px 12px; font-size: 14px; min-height:44px; }
+          .btn { padding: 8px 10px; font-size: 13px; min-height:34px; }
         }
         @media (min-width: 641px) {
           .mobile-list { display:none; }
@@ -396,7 +412,6 @@ export default function App() {
         const snap = await getDoc(ref);
 
         if (snap.exists()) {
-          // aggiorno solo anagrafiche, non tocco stato/tempi/log
           const patch: any = {};
           if (customer !== undefined) patch.customer = String(customer);
           if (description !== undefined) patch.description = String(description);
@@ -434,7 +449,6 @@ export default function App() {
         }
       }
 
-      // reload
       const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')));
       setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as OrderItem[]);
       alert(`Import completato. Creati: ${created}, Aggiornati: ${updated}.`);
@@ -639,17 +653,16 @@ export default function App() {
       });
 
       const patch: any = {
-        status: 'eseguito',                         // => sposta a destra
+        status: 'eseguito',
         status_changed_at: serverTimestamp(),
         last_done_at: serverTimestamp(),
         forced_completed: true,
-        qty_done: Number(qtyFinal || 0),            // es. 90/180
+        qty_done: Number(qtyFinal || 0),
         notes_log: notesLog,
       };
 
       await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
 
-      // aggiorno stato locale: sparisce a sinistra, compare a destra
       setOrders((prev) =>
         prev.map((o: any) =>
           o.id === row.id
@@ -659,6 +672,25 @@ export default function App() {
       );
     } catch (err: any) {
       alert('Errore forza conclusione: ' + err.message);
+    }
+  };
+
+  /* --------- Azzera quantità fatta (ADMIN) --------- */
+  const resetQtyDone = async (row: any) => {
+    try {
+      const notesLog = Array.isArray((row as any).notes_log) ? [...(row as any).notes_log] : [];
+      notesLog.push({
+        ts: new Date().toISOString(),
+        operator: 'SYSTEM',
+        text: 'Azzera quantità fatta',
+        step: null,
+        pieces: 0,
+      });
+      const patch: any = { qty_done: 0, notes_log: notesLog };
+      await setDoc(doc(db, 'order_items', (row as any).id!), patch, { merge: true });
+      setOrders((prev) => prev.map((o: any) => (o.id === row.id ? { ...o, ...patch } : o)) as any);
+    } catch (err: any) {
+      alert('Errore azzera quantità: ' + err.message);
     }
   };
 
@@ -934,7 +966,7 @@ export default function App() {
             className="btn"
             onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
             style={{
-              padding: '8px 10px',
+              padding: '6px 8px',
               opacity: hasNotes ? 1 : 0.7,
               border: hasNotes ? '1px solid #888' : '1px dashed #666'
             }}
@@ -949,14 +981,14 @@ export default function App() {
 
   /* ------------------- Render ------------------- */
   return (
-    <div style={{ padding: 16 }}>
-      <h2 style={{ marginTop: 0 }}>Gestione Produzione</h2>
+    <div style={{ padding: 8 }}>
+      <h2 style={{ marginTop: 0, marginBottom: 8 }}>Gestione Produzione</h2>
 
       {/* TOP ROW */}
       <div className="top-row">
         {/* controlli */}
         <div className="controls">
-          <div style={{ minWidth: 220, maxWidth: 360, width: '100%' }}>
+          <div style={{ minWidth: 200, maxWidth: 320, width: '100%' }}>
             <input
               type="file"
               accept=".csv,.txt"
@@ -971,16 +1003,16 @@ export default function App() {
         {/* CRUSCOTTO */}
         <div
           style={{
-            marginLeft: 12,
+            marginLeft: 8,
             flex: 1,
             border: '1px solid #2b2f3a',
             borderRadius: 8,
-            padding: 12,
-            minWidth: 280
+            padding: 10,
+            minWidth: 260
           }}
         >
-          <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 18 }}>Cruscotto</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(140px,1fr))', gap: 12 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 6, fontSize: 16 }}>Cruscotto</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(140px,1fr))', gap: 10 }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <div style={{ fontSize: 12, opacity: 0.8 }}>Ordini dal…</div>
               <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
@@ -996,13 +1028,13 @@ export default function App() {
               </select>
             </label>
 
-            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 12, display:'grid', gap:4, alignContent:'start' }}>
+            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display:'grid', gap:4, alignContent:'start' }}>
               <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
               <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
               <div>Completati: <strong>{kpi.eseguiti}</strong></div>
             </div>
 
-            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 12, display:'grid', gap:4, alignContent:'start' }}>
+            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display:'grid', gap:4, alignContent:'start' }}>
               <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
               <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
               <div><button className="btn" onClick={exportExcel}>SCARICO EXCEL</button></div>
@@ -1029,8 +1061,7 @@ export default function App() {
                 <tr>
                   <th>Ordine</th>
                   <th>Cliente</th>
-                  <th className="col-code">Codice</th>
-                  <th className="col-desc">Descrizione</th>
+                  <th>Codice / Descrizione</th>
                   <th>Q.ta rich.</th>
                   <th>Q.ta fatta</th>
                   <th>Rimanenti</th>
@@ -1056,20 +1087,9 @@ export default function App() {
                     <tr key={row.id}>
                       <td><strong>{(row as any).order_number}</strong></td>
                       <td>{(row as any).customer || ''}</td>
-                      <td className="col-code">{(row as any).product_code}</td>
-                      <td className="col-desc">
-                        <div
-                          title={(row as any).description || ''}
-                          style={{
-                            maxWidth: 520,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            opacity: (row as any).description ? 1 : 0.6
-                          }}
-                        >
-                          {(row as any).description || '—'}
-                        </div>
+                      <td className="cell-code-desc" title={(row as any).description || ''}>
+                        <div className="code">{(row as any).product_code}</div>
+                        <div className="desc">{(row as any).description || '—'}</div>
                       </td>
                       <td>{richiesta || ''}</td>
                       <td>{fatta}</td>
@@ -1078,7 +1098,7 @@ export default function App() {
                       <td>
                         <span style={{ fontVariantNumeric: 'tabular-nums' }}>{secToHMS(elapsed)}</span>
                         {(row as any).status === 'pausato' && (
-                          <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 6, background: '#666', color: 'white' }}>
+                          <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 6, background: '#666', color: 'white' }}>
                             Pausa
                           </span>
                         )}
@@ -1122,8 +1142,6 @@ export default function App() {
                           >
                             Note
                           </button>
-
-                          {/* Forza conclusione è solo in ADMIN */}
                         </div>
                       </td>
                     </tr>
@@ -1140,12 +1158,12 @@ export default function App() {
           style={{
             border: '1px solid #2b2f3a',
             borderRadius: 8,
-            padding: 12,
+            padding: 10,
             alignSelf: 'start',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <h3 style={{ margin: 0, fontSize: 18 }}>Completati</h3>
+            <h3 style={{ margin: 0, fontSize: 16 }}>Completati</h3>
           </div>
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'grid', gap: 6 }}>
             {completati.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>— nessun ordine —</div>}
@@ -1226,7 +1244,7 @@ export default function App() {
             <input value={stopNotes} onChange={(e) => setStopNotes(e.target.value)} placeholder="Es. RAL 9010" />
           </label>
         </div>
-        <div style={{ textAlign: 'right', marginTop: 12 }}>
+        <div style={{ textAlign: 'right', marginTop: 10 }}>
           <button className="btn btn-danger" onClick={confirmStop}>Registra</button>
         </div>
       </Modal>
@@ -1319,7 +1337,7 @@ export default function App() {
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
           <button className="btn btn-primary" onClick={async () => {
             if (!advanceTarget) return;
             const id = (advanceTarget as any).id!;
@@ -1346,11 +1364,11 @@ export default function App() {
 
       {/* ADMIN MODAL */}
       <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Gestione Operatori & Ordini">
-        <div style={{ display: 'grid', gap: 16 }}>
+        <div style={{ display: 'grid', gap: 14 }}>
           {/* Operatori */}
           <div>
-            <h4 style={{ margin: '0 0 8px' }}>Operatori</h4>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <h4 style={{ margin: '0 0 6px' }}>Operatori</h4>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <input
                 placeholder="Nuovo operatore"
                 value={newOperatorName}
@@ -1358,9 +1376,9 @@ export default function App() {
               />
               <button className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
             </div>
-            <div style={{ maxHeight: 200, overflow: 'auto', borderTop: '1px solid #eee', marginTop: 8, paddingTop: 8 }}>
+            <div style={{ maxHeight: 180, overflow: 'auto', borderTop: '1px solid #eee', marginTop: 6, paddingTop: 6 }}>
               {operators.map((op: any) => (
-                <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                <div key={op.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
                   <div style={{ flex: 1 }}>{op.name} {op.active ? '' : <span style={{ color: '#a00' }}>(disattivo)</span>}</div>
                   <button className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
                   <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
@@ -1371,14 +1389,14 @@ export default function App() {
 
           {/* Ordini */}
           <div>
-            <h4 style={{ margin: '0 0 8px' }}>Ordini (stato / nascondi / ripristina / forza conclusione)</h4>
-            <div style={{ maxHeight: 420, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 8, display:'grid', gap:8 }}>
+            <h4 style={{ margin: '0 0 6px' }}>Ordini (stato / nascondi / ripristina / forza conclusione / azzera q.ta)</h4>
+            <div style={{ maxHeight: 420, overflow: 'auto', borderTop: '1px solid #eee', paddingTop: 6, display:'grid', gap:8 }}>
               {baseFiltered.map((o: any) => (
-                <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 8, alignItems: 'center', padding: '4px 0' }}>
+                <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 6, alignItems: 'center', padding: '4px 0' }}>
                   <div style={{ opacity: (o as any).hidden ? 0.6 : 1 }}>
-                    {(o as any).order_number} · {(o as any).product_code} — <em>{(o as any).hidden ? 'CANCELLATO' : (o as any).status}</em>
+                    {(o as any).order_number} · {(o as any).product_code} — <em>{(o as any).hidden ? 'CANCELLATO' : (o as any).status}</em> — <strong>{o.qty_done || 0}</strong> / {o.qty_requested || 0}
                   </div>
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent:'flex-end' }}>
+                  <div style={{ display:'flex', gap:6, alignItems:'center', justifyContent:'flex-end' }}>
                     <select
                       value={(o as any).status}
                       onChange={(e) => changeStatus(o, e.target.value)}
@@ -1400,8 +1418,8 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Forza conclusione (solo ADMIN) */}
-                  <div style={{ display:'flex', gap:6, alignItems:'center', gridColumn: '1 / -1' }}>
+                  {/* Forza conclusione + Azzera */}
+                  <div style={{ display:'flex', gap:6, alignItems:'center', gridColumn: '1 / -1', flexWrap:'wrap' }}>
                     <input
                       type="number"
                       min={0}
@@ -1412,7 +1430,7 @@ export default function App() {
                         setAdminForceQty(prev => ({ ...prev, [o.id]: v === '' ? '' : Number(v) }));
                       }}
                       placeholder="Q.ta completata (facoltativa)"
-                      style={{ width: 200 }}
+                      style={{ width: 180 }}
                       title="Se vuoto, userà la Q.ta richiesta (se presente)"
                     />
                     <button
@@ -1422,6 +1440,14 @@ export default function App() {
                       title="Segna come completato con la quantità indicata"
                     >
                       Forza conclusione
+                    </button>
+
+                    <button
+                      className="btn"
+                      onClick={() => resetQtyDone(o)}
+                      title="Azzera solo la Q.ta fatta (non cancella log)"
+                    >
+                      Azzera Q.ta fatta
                     </button>
                   </div>
                 </div>
@@ -1466,7 +1492,7 @@ export default function App() {
             <input value={newOrder.steps_count as any} onChange={(e) => setNewOrder({ ...newOrder, steps_count: e.target.value as any })} />
           </label>
         </div>
-        <div style={{ textAlign:'right', marginTop:12 }}>
+        <div style={{ textAlign:'right', marginTop:10 }}>
           <button className="btn btn-primary" onClick={createOrder}>Crea</button>
         </div>
       </Modal>
