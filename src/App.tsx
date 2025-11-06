@@ -295,18 +295,27 @@ export default function App() {
     return list;
   }, [orders, filterFrom, filterCustomer]);
 
-  // SINISTRA: solo stati "di linea" e non già completamente fatti
+  // SINISTRA: mostra anche ordini in essiccazione/imballaggio/pronti se NON completamente finiti
   const visibleOrders = useMemo(() => {
     return baseFiltered.filter((o: any) => {
       if ((o as any).hidden) return false;
-      const st = (o as any).status;
+
       const req = Number((o as any).qty_requested || 0);
       const done = Number((o as any).qty_done || 0);
       const fullyDone = req > 0 && done >= req;
-      const isLeft = ['da_iniziare', 'in_esecuzione', 'pausato'].includes(st);
-      if (!isLeft) return false;
-      if (fullyDone) return false;
-      return true;
+
+      // FIX: lasciamo a sinistra qualsiasi stato "di flusso" finché non è completamente finito
+      const st = (o as any).status;
+      const showOnLeftIfNotDone = [
+        'da_iniziare',
+        'in_esecuzione',
+        'pausato',
+        'in_essiccazione',
+        'in_imballaggio',
+        'pronti_consegna',
+      ].includes(st);
+
+      return showOnLeftIfNotDone && !fullyDone;
     });
   }, [baseFiltered]);
 
