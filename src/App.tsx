@@ -202,7 +202,7 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
         {props.title && <h3 style={{ marginTop: 0, marginBottom: 8 }}>{props.title}</h3>}
         {props.children}
         <div style={{ textAlign: 'right', marginTop: 10 }}>
-          <button className="btn btn-secondary" onClick={props.onClose}>
+          <button type="button" className="btn btn-secondary" onClick={props.onClose}>
             Chiudi
           </button>
         </div>
@@ -382,7 +382,7 @@ export default function App() {
   const onPause = async (row: any) => {
     const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
     const now = Date.now();
-    definitelyRead(t); // keep TS calm if unused elsewhere
+    definitelyRead(t);
     const extra = t.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
     const elapsed = (t.elapsed || 0) + extra;
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed } }));
@@ -407,7 +407,6 @@ export default function App() {
     );
   };
 
-  // tiny no-op used to avoid TS "t unused" warning in onPause path when bundlers mangle
   function definitelyRead(_x:any){}
 
   /* ---- Stop: aggiorna progress e crea BATCH solo all’ultimo passaggio ---- */
@@ -474,13 +473,12 @@ export default function App() {
       duration_sec: extraFromRun,
     });
 
-    // batches: crea solo quando si chiude l’ULTIMO passaggio e aumentano i pezzi completamente finiti
     const nextBatches: Batch[] = Array.isArray(row.batches) ? [...row.batches] : [];
     if (fullyDelta > 0 && stepsCount > 0 && pass === stepsCount) {
       nextBatches.push({
         id: genId(),
         qty: fullyDelta,
-        status: 'parziale',   // grigio
+        status: 'parziale',
         created_at: new Date() as any,
       });
     }
@@ -553,8 +551,30 @@ export default function App() {
     if (!order) return;
 
     const batches: Batch[] = Array.isArray(order.batches) ? [...order.batches] : [];
-    const idx = batches.findIndex((b) => b.id === advanceBatchId);
-    if (idx === -1) return;
+    let idx = batches.findIndex((b) => b.id === advanceBatchId);
+
+    // --- FIX: se il batch è "virtuale" (id="__virtual__"), creane uno reale adesso ---
+    if (idx === -1 && advanceBatchId === '__virtual__') {
+      const qtyFromOrder = Math.max(0, Number(order.qty_done || 0));
+      if (qtyFromOrder <= 0) {
+        alert('Nessuna quantità disponibile per creare un parziale.');
+        return;
+      }
+      const newReal: Batch = {
+        id: genId(),
+        qty: qtyFromOrder,
+        status: 'parziale',
+        created_at: new Date() as any,
+      };
+      batches.push(newReal);
+      idx = batches.length - 1;
+    }
+
+    if (idx === -1) {
+      // nessun batch trovato e non è virtuale: niente da fare
+      alert('Parziale non trovato. Riapri la finestra e riprova.');
+      return;
+    }
 
     const b = { ...batches[idx] };
     b.status = advancePhase;
@@ -900,6 +920,7 @@ export default function App() {
       if (o.hidden) return;
       const arr: Batch[] = Array.isArray(o.batches) ? o.batches : [];
       arr.forEach((b) => out.push({ order: o, batch: b }));
+      // compat “vecchio”: virtual batch se non ci sono batches ma qty_done>0
       if (arr.length === 0 && Number(o.qty_done || 0) > 0) {
         out.push({
           order: o,
@@ -1021,10 +1042,10 @@ export default function App() {
               style={{ width: '100%' }}
             />
           </div>
-          <button className="btn" onClick={() => setAdminOpen(true)}>
+          <button type="button" className="btn" onClick={() => setAdminOpen(true)}>
             ADMIN
           </button>
-          <button className="btn btn-primary" onClick={() => setNewOrderOpen(true)}>
+          <button type="button" className="btn btn-primary" onClick={() => setNewOrderOpen(true)}>
             INSERISCI ORDINE
           </button>
         </div>
@@ -1065,7 +1086,7 @@ export default function App() {
             <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display: 'grid', gap: 4, alignContent: 'start' }}>
               <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
               <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
-              <div><button className="btn" onClick={exportExcel}>SCARICO EXCEL</button></div>
+              <div><button type="button" className="btn" onClick={exportExcel}>SCARICO EXCEL</button></div>
             </div>
           </div>
         </div>
@@ -1123,13 +1144,14 @@ export default function App() {
                       </td>
                       <td>
                         <div className="actions">
-                          <button className="btn btn-primary" disabled={row.status !== 'da_iniziare'} onClick={() => onStart(row)}>Start</button>
+                          <button type="button" className="btn btn-primary" disabled={row.status !== 'da_iniziare'} onClick={() => onStart(row)}>Start</button>
                           {row.status === 'in_esecuzione' && (
-                            <button className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>
+                            <button type="button" className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>
                           )}
-                          <button className="btn btn-success" disabled={row.status !== 'pausato'} onClick={() => onResume(row)}>Riprendi</button>
-                          <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
+                          <button type="button" className="btn btn-success" disabled={row.status !== 'pausato'} onClick={() => onResume(row)}>Riprendi</button>
+                          <button type="button" className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
                           <button
+                            type="button"
                             className="btn"
                             onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
                             style={{ padding: '4px 8px', fontSize: 12, opacity: hasNotes ? 1 : 0.6, border: hasNotes ? '1px solid #888' : '1px dashed #666' }}
@@ -1197,13 +1219,14 @@ export default function App() {
                   </div>
 
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                    <button className="btn btn-primary" disabled={row.status !== 'da_iniziare'} onClick={() => onStart(row)}>Start</button>
+                    <button type="button" className="btn btn-primary" disabled={row.status !== 'da_iniziare'} onClick={() => onStart(row)}>Start</button>
                     {row.status === 'in_esecuzione' && (
-                      <button className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>
+                      <button type="button" className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>
                     )}
-                    <button className="btn btn-success" disabled={row.status !== 'pausato'} onClick={() => onResume(row)}>Riprendi</button>
-                    <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
+                    <button type="button" className="btn btn-success" disabled={row.status !== 'pausato'} onClick={() => onResume(row)}>Riprendi</button>
+                    <button type="button" className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
                     <button
+                      type="button"
                       className="btn"
                       onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
                       style={{ padding: '6px 10px', fontSize: 12, opacity: hasNotes ? 1 : 0.6, border: hasNotes ? '1px solid #888' : '1px dashed #666' }}
@@ -1228,6 +1251,7 @@ export default function App() {
             {batchesOnRight.map(({ order, batch }, idx) => (
               <button
                 key={order.id + '_' + batch.id + '_' + idx}
+                type="button"
                 className="btn"
                 onClick={() => openAdvanceForBatch(order, batch)}
                 style={{
@@ -1284,7 +1308,7 @@ export default function App() {
           </label>
         </div>
         <div style={{ textAlign:'right', marginTop:10 }}>
-          <button className="btn btn-danger" onClick={confirmStop}>Registra</button>
+          <button type="button" className="btn btn-danger" onClick={confirmStop}>Registra</button>
         </div>
       </Modal>
 
@@ -1346,7 +1370,7 @@ export default function App() {
           )}
         </div>
         <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:10 }}>
-          <button className="btn btn-primary" onClick={saveAdvance}>Salva</button>
+          <button type="button" className="btn btn-primary" onClick={saveAdvance}>Salva</button>
         </div>
       </Modal>
 
@@ -1357,14 +1381,14 @@ export default function App() {
             <h4 style={{ margin:'0 0 6px' }}>Operatori</h4>
             <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
               <input placeholder="Nuovo operatore" value={newOperatorName} onChange={(e) => setNewOperatorName(e.target.value)} />
-              <button className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
+              <button type="button" className="btn btn-primary" onClick={addOperator}>Aggiungi</button>
             </div>
             <div style={{ maxHeight:180, overflow:'auto', borderTop:'1px solid #eee', marginTop:6, paddingTop:6 }}>
               {operators.map((op: any) => (
                 <div key={op.id} style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 0' }}>
                   <div style={{ flex:1 }}>{op.name} {op.active ? '' : <span style={{ color:'#a00' }}>(disattivo)</span>}</div>
-                  <button className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
-                  <button className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
+                  <button type="button" className="btn" onClick={() => toggleOperator(op)}>{op.active ? 'Disattiva' : 'Attiva'}</button>
+                  <button type="button" className="btn btn-danger" onClick={() => removeOperator(op)}>Elimina</button>
                 </div>
               ))}
             </div>
@@ -1390,9 +1414,9 @@ export default function App() {
                     </select>
 
                     {!o.hidden ? (
-                      <button className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
+                      <button type="button" className="btn btn-danger" onClick={() => hideOrder(o)}>Nascondi</button>
                     ) : (
-                      <button className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
+                      <button type="button" className="btn" onClick={() => restoreOrder(o)}>Ripristina</button>
                     )}
                   </div>
 
@@ -1408,6 +1432,7 @@ export default function App() {
                       title="Se vuoto, userà la Q.ta richiesta (se presente)"
                     />
                     <button
+                      type="button"
                       className="btn" onClick={() =>
                         forceComplete(o, adminForceQty[o.id] === '' || adminForceQty[o.id] === undefined ? undefined : Number(adminForceQty[o.id]))
                       }
@@ -1416,9 +1441,9 @@ export default function App() {
                       Forza conclusione
                     </button>
 
-                    <button className="btn" onClick={() => resetOrder(o)}>Azzera ordine</button>
+                    <button type="button" className="btn" onClick={() => resetOrder(o)}>Azzera ordine</button>
 
-                    <button className="btn btn-danger" onClick={() => deleteForever(o)}>Elimina per sempre</button>
+                    <button type="button" className="btn btn-danger" onClick={() => deleteForever(o)}>Elimina per sempre</button>
                   </div>
                 </div>
               ))}
@@ -1515,7 +1540,7 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
-          <button className="btn btn-primary" onClick={saveNewOrder}>
+          <button type="button" className="btn btn-primary" onClick={saveNewOrder}>
             Salva ordine
           </button>
         </div>
