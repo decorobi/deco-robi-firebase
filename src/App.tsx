@@ -22,7 +22,6 @@ import {
 type RowIn = Record<string, any>;
 type TimerState = { running: boolean; startedAt: number | null; elapsed: number };
 
-// batch per “parziali” a destra
 type Batch = {
   id: string;
   qty: number;
@@ -61,10 +60,12 @@ type StepAgg = { step: number; pieces: number; timeSec: number };
 const aggregateStepStats = (row: any): StepAgg[] => {
   const time = (row?.steps_time ?? {}) as Record<string | number, number>;
   const prog = (row?.steps_progress ?? {}) as Record<string | number, number>;
-  const steps = new Set<number>([
-    ...Object.keys(time).map((n) => Number(n)),
-    ...Object.keys(prog).map((n) => Number(n)),
-  ].filter((n) => Number.isFinite(n) && n > 0));
+  const steps = new Set<number>(
+    [
+      ...Object.keys(time).map((n) => Number(n)),
+      ...Object.keys(prog).map((n) => Number(n)),
+    ].filter((n) => Number.isFinite(n) && n > 0)
+  );
   return [...steps]
     .map((step) => ({
       step,
@@ -78,7 +79,12 @@ const toDocId = (order: string | number, code: string) =>
   `${String(order)}__${String(code)}`.trim().replace(/[\/\\]/g, '_').replace(/\s+/g, ' ');
 
 const normalize = (s: string) =>
-  String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  String(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const pick = (row: Record<string, any>, aliases: string[]) => {
   const nk = Object.keys(row).map((k) => [k, normalize(k)] as const);
@@ -88,15 +94,17 @@ const pick = (row: Record<string, any>, aliases: string[]) => {
 };
 
 const getDayBounds = (date: Date) => {
-  const start = new Date(date); start.setHours(0, 0, 0, 0);
-  const end = new Date(date);   end.setHours(23, 59, 59, 999);
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
   return { start, end };
 };
 
 const computeFullyDone = (
   stepsCount: number,
   stepsProgress: Record<string | number, number> | undefined,
-  defaultZero = 0,
+  defaultZero = 0
 ) => {
   if (!stepsCount || stepsCount <= 0) return 0;
   const vals: number[] = [];
@@ -176,8 +184,13 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
     <div
       onClick={props.onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
       }}
     >
       <div
@@ -188,7 +201,9 @@ function Modal(props: { open: boolean; onClose: () => void; children: React.Reac
         {props.title && <h3 style={{ marginTop: 0, marginBottom: 8 }}>{props.title}</h3>}
         {props.children}
         <div style={{ textAlign: 'right', marginTop: 10 }}>
-          <button className="btn btn-secondary" onClick={props.onClose}>Chiudi</button>
+          <button className="btn btn-secondary" onClick={props.onClose}>
+            Chiudi
+          </button>
         </div>
       </div>
     </div>
@@ -221,7 +236,7 @@ export default function App() {
   const [advanceOrder, setAdvanceOrder] = useState<any>(null);
   const [advanceBatchId, setAdvanceBatchId] = useState<string>('');
   const [advancePhase, setAdvancePhase] =
-    useState<'in_essiccazione'|'in_imballaggio'|'pronti_consegna'>('in_essiccazione');
+    useState<'in_essiccazione' | 'in_imballaggio' | 'pronti_consegna'>('in_essiccazione');
   const [advancePacked, setAdvancePacked] = useState<number>(0);
   const [advanceBoxes, setAdvanceBoxes] = useState<number | ''>('');
   const [advanceSize, setAdvanceSize] = useState<string>('');
@@ -235,6 +250,28 @@ export default function App() {
   // Filtro cruscotto
   const [filterFrom, setFilterFrom] = useState<string>('');
   const [filterCustomer, setFilterCustomer] = useState<string>('');
+
+  // Nuovo ordine (MANUALE)
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [newOrder, setNewOrder] = useState<{
+    order_number: string;
+    customer: string;
+    product_code: string;
+    description: string;
+    ml: string;
+    qty_requested: string;
+    qty_in_oven: string;
+    steps_count: string;
+  }>({
+    order_number: '',
+    customer: '',
+    product_code: '',
+    description: '',
+    ml: '',
+    qty_requested: '',
+    qty_in_oven: '',
+    steps_count: '',
+  });
 
   /* ---- Data load ---- */
   useEffect(() => {
@@ -254,7 +291,10 @@ export default function App() {
 
   const customers = useMemo(() => {
     const vals = new Set<string>();
-    orders.forEach((o: any) => { const c = String(o.customer || '').trim(); if (c) vals.add(c); });
+    orders.forEach((o: any) => {
+      const c = String(o.customer || '').trim();
+      if (c) vals.add(c);
+    });
     return Array.from(vals).sort((a, b) => a.localeCompare(b));
   }, [orders]);
 
@@ -268,7 +308,8 @@ export default function App() {
 
   const baseElapsedOf = (row: any) => Number((row?.total_elapsed_sec ?? row?.elapsed_sec) || 0);
   const createdAtMs = (o: any): number | null => {
-    const ca: any = o.created_at; if (!ca) return null;
+    const ca: any = o.created_at;
+    if (!ca) return null;
     return ca.toMillis ? ca.toMillis() : (typeof ca === 'number' ? ca : null);
   };
 
@@ -294,8 +335,12 @@ export default function App() {
       const fullyDone = req > 0 && done >= req;
       const st = o.status;
       const showOnLeftIfNotDone = [
-        'da_iniziare', 'in_esecuzione', 'pausato',
-        'in_essiccazione', 'in_imballaggio', 'pronti_consegna',
+        'da_iniziare',
+        'in_esecuzione',
+        'pausato',
+        'in_essiccazione',
+        'in_imballaggio',
+        'pronti_consegna',
       ].includes(st);
       return showOnLeftIfNotDone && !fullyDone;
     });
@@ -303,12 +348,17 @@ export default function App() {
 
   const kpi = useMemo(() => {
     const byStatus = (st: any) => baseFiltered.filter((o: any) => !o.hidden && o.status === st).length;
-    return { da_iniziare: byStatus('da_iniziare'), in_esecuzione: byStatus('in_esecuzione'), eseguiti: byStatus('eseguito') };
+    return {
+      da_iniziare: byStatus('da_iniziare'),
+      in_esecuzione: byStatus('in_esecuzione'),
+      eseguiti: byStatus('eseguito'),
+    };
   }, [baseFiltered]);
 
   const todayAgg = useMemo(() => {
     const { start, end } = getDayBounds(new Date());
-    let pezzi = 0; let sec = 0;
+    let pezzi = 0;
+    let sec = 0;
     baseFiltered.forEach((o: any) => {
       const ldt: any = o.last_done_at;
       const ms = ldt?.toMillis ? ldt.toMillis() : (typeof ldt === 'number' ? ldt : null);
@@ -324,7 +374,9 @@ export default function App() {
   const onStart = async (row: any) => {
     setTimers((t) => ({ ...t, [row.id!]: { running: true, startedAt: Date.now(), elapsed: baseElapsedOf(row) } }));
     await updateDoc(doc(db, 'order_items', row.id!), { status: 'in_esecuzione', timer_start: Date.now() } as any);
-    setOrders((prev: any[]) => prev.map((o) => o.id === row.id ? { ...o, status: 'in_esecuzione', timer_start: Date.now() } : o));
+    setOrders((prev: any[]) =>
+      prev.map((o) => (o.id === row.id ? { ...o, status: 'in_esecuzione', timer_start: Date.now() } : o))
+    );
   };
   const onPause = async (row: any) => {
     const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
@@ -334,18 +386,26 @@ export default function App() {
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed } }));
     await updateDoc(doc(db, 'order_items', row.id!), {
       status: 'pausato',
-      elapsed_sec: elapsed, total_elapsed_sec: elapsed, timer_start: null,
+      elapsed_sec: elapsed,
+      total_elapsed_sec: elapsed,
+      timer_start: null,
     } as any);
-    setOrders((prev: any[]) => prev.map((o) => o.id === row.id ? { ...o, status: 'pausato', elapsed_sec: elapsed, total_elapsed_sec: elapsed, timer_start: null } : o));
+    setOrders((prev: any[]) =>
+      prev.map((o) =>
+        o.id === row.id ? { ...o, status: 'pausato', elapsed_sec: elapsed, total_elapsed_sec: elapsed, timer_start: null } : o
+      )
+    );
   };
   const onResume = async (row: any) => {
     const prevElapsed = Number(timers[row.id!]?.elapsed ?? baseElapsedOf(row) ?? 0);
     setTimers((t) => ({ ...t, [row.id!]: { running: true, startedAt: Date.now(), elapsed: prevElapsed } }));
     await updateDoc(doc(db, 'order_items', row.id!), { status: 'in_esecuzione', timer_start: Date.now() } as any);
-    setOrders((prev: any[]) => prev.map((o) => o.id === row.id ? { ...o, status: 'in_esecuzione', timer_start: Date.now() } : o));
+    setOrders((prev: any[]) =>
+      prev.map((o) => (o.id === row.id ? { ...o, status: 'in_esecuzione', timer_start: Date.now() } : o))
+    );
   };
 
-  /* ---- Stop: aggiorna progress e crea BATCH nuovi ---- */
+  /* ---- Stop: aggiorna progress e crea BATCH solo all’ultimo passaggio ---- */
   const openStop = (row: any) => {
     setStopTarget(row);
     setStopPieces(0);
@@ -359,11 +419,19 @@ export default function App() {
     if (!stopTarget) return;
     const row: any = stopTarget;
     const stepsCount = Number(row.steps_count || 0);
+
     if (!stopStep || stopStep < 1 || (stepsCount > 0 && stopStep > stepsCount)) {
-      alert('Seleziona un passaggio valido.'); return;
+      alert('Seleziona un passaggio valido.');
+      return;
     }
-    if (!stopPieces || stopPieces <= 0) { alert('Inserisci i pezzi.'); return; }
-    if (!stopOperator) { alert('Seleziona un operatore.'); return; }
+    if (!stopPieces || stopPieces <= 0) {
+      alert('Inserisci i pezzi.');
+      return;
+    }
+    if (!stopOperator) {
+      alert('Seleziona un operatore.');
+      return;
+    }
 
     const t = timers[row.id!];
     const now = Date.now();
@@ -378,9 +446,10 @@ export default function App() {
     const nextStepsProg: Record<number, number> = { ...(row.steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + Number(stopPieces || 0);
 
+    // calcolo “pezzi completamente finiti” PRIMA e DOPO
     const prevFully = Number(row.qty_done || 0);
     const newFully = computeFullyDone(stepsCount, nextStepsProg, 0);
-    const deltaNewBatch = Math.max(0, newFully - prevFully); // ⬅️ NUOVO BATCH se >0
+    const fullyDelta = Math.max(0, newFully - prevFully);
 
     // log
     const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
@@ -402,13 +471,14 @@ export default function App() {
       duration_sec: extraFromRun,
     });
 
-    // batches (compat)
-    const batches: Batch[] = Array.isArray(row.batches) ? [...row.batches] : [];
-    if (deltaNewBatch > 0) {
-      batches.push({
+    // batches: CREA SOLO SE i pezzi “completamente finiti” sono aumentati
+    // E SOLO se lo STOP è sull’ULTIMO PASSAGGIO di quell’ordine
+    const nextBatches: Batch[] = Array.isArray(row.batches) ? [...row.batches] : [];
+    if (fullyDelta > 0 && stepsCount > 0 && pass === stepsCount) {
+      nextBatches.push({
         id: genId(),
-        qty: deltaNewBatch,
-        status: 'parziale',
+        qty: fullyDelta,
+        status: 'parziale',           // PARZIALE (grigio)
         created_at: new Date() as any,
       });
     }
@@ -419,30 +489,40 @@ export default function App() {
     // persist
     const patch: any = {
       status: isCompletedTot ? 'eseguito' : 'da_iniziare',
-      elapsed_sec: totalElapsed, total_elapsed_sec: totalElapsed, timer_start: null,
+      elapsed_sec: totalElapsed,
+      total_elapsed_sec: totalElapsed,
+      timer_start: null,
       last_done_at: serverTimestamp(),
-      steps_time: nextStepsTime, steps_progress: nextStepsProg,
+      steps_time: nextStepsTime,
+      steps_progress: nextStepsProg,
       qty_done: newFully,
       last_operator: stopOperator || null,
       last_notes: stopNotes || null,
-      last_step: pass, last_pieces: Number(stopPieces || 0), last_duration_sec: extraFromRun,
-      notes_log: notesLog, ops_log: opsLog,
-      batches,                                         // ⬅️ salva i batch aggiornati
+      last_step: pass,
+      last_pieces: Number(stopPieces || 0),
+      last_duration_sec: extraFromRun,
+      notes_log: notesLog,
+      ops_log: opsLog,
+      batches: nextBatches,
     };
 
     await setDoc(doc(db, 'order_items', row.id!), patch, { merge: true });
 
-    // stato locale
-    setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: totalElapsed } }));
+    // UI immediata
     setOrders((prev: any[]) =>
-      prev.map((o) => o.id === row.id ? {
-        ...o,
-        ...patch,
-        last_done_at: new Date() as any,
-        status_changed_at: isCompletedTot ? new Date() as any : o.status_changed_at
-      } : o)
+      prev.map((o) =>
+        o.id === row.id
+          ? {
+              ...o,
+              ...patch,
+              last_done_at: new Date() as any,
+              status_changed_at: isCompletedTot ? (new Date() as any) : o.status_changed_at,
+            }
+          : o
+      )
     );
 
+    setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: totalElapsed } }));
     setStopOpen(false);
   };
 
@@ -450,12 +530,18 @@ export default function App() {
   const openAdvanceForBatch = (order: any, batch: Batch) => {
     setAdvanceOrder(order);
     setAdvanceBatchId(batch.id);
-    const ph: any = ['in_essiccazione','in_imballaggio','pronti_consegna'].includes(batch.status) ? batch.status : 'in_essiccazione';
+    const ph: any = ['in_essiccazione', 'in_imballaggio', 'pronti_consegna'].includes(batch.status)
+      ? batch.status
+      : 'in_essiccazione';
     setAdvancePhase(ph);
     setAdvancePacked(Number(batch.packed_qty || 0));
-    setAdvanceBoxes(batch.packed_boxes === undefined || batch.packed_boxes === null ? '' : Number(batch.packed_boxes));
+    setAdvanceBoxes(
+      batch.packed_boxes === undefined || batch.packed_boxes === null ? '' : Number(batch.packed_boxes)
+    );
     setAdvanceSize(batch.packed_size || '');
-    setAdvanceWeight(batch.packed_weight === undefined || batch.packed_weight === null ? '' : Number(batch.packed_weight));
+    setAdvanceWeight(
+      batch.packed_weight === undefined || batch.packed_weight === null ? '' : Number(batch.packed_weight)
+    );
     setAdvanceNotes(batch.packed_notes || '');
     setAdvanceOpen(true);
   };
@@ -475,21 +561,27 @@ export default function App() {
     b.status_changed_at = new Date() as any;
 
     if (advancePhase === 'pronti_consegna') {
-      if (!advancePacked || advancePacked <= 0) { alert('Inserisci i pezzi imballati.'); return; }
+      if (!advancePacked || advancePacked <= 0) {
+        alert('Inserisci i pezzi imballati.');
+        return;
+      }
       b.packed_qty = Number(advancePacked);
       b.packed_boxes = advanceBoxes === '' ? null : Number(advanceBoxes);
       b.packed_size = advanceSize.trim() || null;
       b.packed_weight = advanceWeight === '' ? null : Number(advanceWeight);
       b.packed_notes = advanceNotes.trim() || null;
     } else {
-      b.packed_qty = 0; b.packed_boxes = null; b.packed_size = null; b.packed_weight = null; b.packed_notes = null;
+      b.packed_qty = 0;
+      b.packed_boxes = null;
+      b.packed_size = null;
+      b.packed_weight = null;
+      b.packed_notes = null;
     }
 
     batches[idx] = b;
 
     await updateDoc(doc(db, 'order_items', id), { batches } as any);
-
-    setOrders((prev: any[]) => prev.map((o) => o.id === id ? { ...o, batches } : o));
+    setOrders((prev: any[]) => prev.map((o) => (o.id === id ? { ...o, batches } : o)));
     setAdvanceOpen(false);
   };
 
@@ -505,7 +597,7 @@ export default function App() {
   };
   const toggleOperator = async (op: any) => {
     await updateDoc(doc(db, 'operators', op.id), { active: !op.active } as any);
-    setOperators((prev: any) => prev.map((o: any) => o.id === op.id ? { ...o, active: !o.active } : o));
+    setOperators((prev: any) => prev.map((o: any) => (o.id === op.id ? { ...o, active: !o.active } : o)));
   };
   const removeOperator = async (op: any) => {
     await deleteDoc(doc(db, 'operators', op.id));
@@ -515,67 +607,126 @@ export default function App() {
   const changeStatus = async (o: any, newStatus: any) => {
     const patch: any = { status: newStatus, status_changed_at: serverTimestamp() };
     await updateDoc(doc(db, 'order_items', o.id), patch);
-    setOrders((prev: any[]) => prev.map((x) => x.id === o.id ? { ...x, ...patch, status_changed_at: new Date() as any } : x));
+    setOrders((prev: any[]) =>
+      prev.map((x) => (x.id === o.id ? { ...x, ...patch, status_changed_at: new Date() as any } : x))
+    );
   };
 
   const hideOrder = async (o: any) => {
     await updateDoc(doc(db, 'order_items', o.id), { hidden: true, deleted_at: serverTimestamp() } as any);
-    setOrders((prev: any[]) => prev.map((x) => x.id === o.id ? { ...x, hidden: true, deleted_at: new Date() as any } : x));
+    setOrders((prev: any[]) => prev.map((x) => (x.id === o.id ? { ...x, hidden: true, deleted_at: new Date() as any } : x)));
   };
   const restoreOrder = async (o: any) => {
     await updateDoc(doc(db, 'order_items', o.id), { hidden: false } as any);
-    setOrders((prev: any[]) => prev.map((x) => x.id === o.id ? { ...x, hidden: false } : x));
+    setOrders((prev: any[]) => prev.map((x) => (x.id === o.id ? { ...x, hidden: false } : x)));
   };
 
   const forceComplete = async (row: any, qtyOverride?: number) => {
     try {
       const richiesta = Number(row.qty_requested ?? 0);
       const qtyFinal =
-        typeof qtyOverride === 'number' && qtyOverride >= 0 ? qtyOverride :
-        (richiesta > 0 ? richiesta : Number(row.qty_done || 0));
+        typeof qtyOverride === 'number' && qtyOverride >= 0
+          ? qtyOverride
+          : richiesta > 0
+          ? richiesta
+          : Number(row.qty_done || 0);
 
       const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
-      notesLog.push({ ts: new Date().toISOString(), operator: 'SYSTEM', text: 'Forza conclusione', step: null, pieces: qtyFinal });
+      notesLog.push({
+        ts: new Date().toISOString(),
+        operator: 'SYSTEM',
+        text: 'Forza conclusione',
+        step: null,
+        pieces: qtyFinal,
+      });
 
       const patch: any = {
-        status: 'eseguito', status_changed_at: serverTimestamp(), last_done_at: serverTimestamp(),
-        forced_completed: true, qty_done: Number(qtyFinal || 0), notes_log: notesLog,
+        status: 'eseguito',
+        status_changed_at: serverTimestamp(),
+        last_done_at: serverTimestamp(),
+        forced_completed: true,
+        qty_done: Number(qtyFinal || 0),
+        notes_log: notesLog,
       };
 
       await setDoc(doc(db, 'order_items', row.id!), patch, { merge: true });
-      setOrders((prev: any[]) => prev.map((o) => o.id === row.id ? { ...o, ...patch, status_changed_at: new Date() as any, last_done_at: new Date() as any } : o));
-    } catch (err: any) { alert('Errore forza conclusione: ' + err.message); }
+      setOrders((prev: any[]) =>
+        prev.map((o) =>
+          o.id === row.id ? { ...o, ...patch, status_changed_at: new Date() as any, last_done_at: new Date() as any } : o
+        )
+      );
+    } catch (err: any) {
+      alert('Errore forza conclusione: ' + err.message);
+    }
   };
 
   const resetOrder = async (row: any) => {
     try {
       const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
-      notesLog.push({ ts: new Date().toISOString(), operator: 'SYSTEM', text: 'Azzera ordine (reset completo)', step: null, pieces: 0 });
+      notesLog.push({
+        ts: new Date().toISOString(),
+        operator: 'SYSTEM',
+        text: 'Azzera ordine (reset completo)',
+        step: null,
+        pieces: 0,
+      });
 
       const patch: any = {
-        status: 'da_iniziare', status_changed_at: serverTimestamp(),
-        elapsed_sec: 0, total_elapsed_sec: 0, timer_start: null,
-        qty_done: 0, steps_progress: {}, steps_time: {},
-        packed_qty: 0, packed_boxes: null, packed_size: null, packed_weight: null, packed_notes: null,
-        last_operator: null, last_notes: null, last_step: null, last_pieces: null, last_duration_sec: null, last_done_at: null,
-        notes_log: notesLog, forced_completed: false,
-        batches: [],   // azzera anche i batch
+        status: 'da_iniziare',
+        status_changed_at: serverTimestamp(),
+        elapsed_sec: 0,
+        total_elapsed_sec: 0,
+        timer_start: null,
+        qty_done: 0,
+        steps_progress: {},
+        steps_time: {},
+        packed_qty: 0,
+        packed_boxes: null,
+        packed_size: null,
+        packed_weight: null,
+        packed_notes: null,
+        last_operator: null,
+        last_notes: null,
+        last_step: null,
+        last_pieces: null,
+        last_duration_sec: null,
+        last_done_at: null,
+        notes_log: notesLog,
+        forced_completed: false,
+        batches: [],
       };
 
       await setDoc(doc(db, 'order_items', row.id!), patch, { merge: true });
-      setOrders((prev: any[]) => prev.map((o) => o.id === row.id ? { ...o, ...patch, status_changed_at: new Date() as any } : o));
+      setOrders((prev: any[]) => prev.map((o) => (o.id === row.id ? { ...o, ...patch, status_changed_at: new Date() as any } : o)));
       setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed: 0 } }));
-    } catch (err: any) { alert('Errore azzera ordine: ' + err.message); }
+    } catch (err: any) {
+      alert('Errore azzera ordine: ' + err.message);
+    }
   };
 
   const deleteForever = async (row: any) => {
     try {
       const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
-      notesLog.push({ ts: new Date().toISOString(), operator: 'SYSTEM', text: 'Eliminato definitivamente (soft-delete)', step: null, pieces: 0 });
-      const patch: any = { hidden: true, deleted_permanently: true, deleted_at: serverTimestamp(), notes_log: notesLog };
+      notesLog.push({
+        ts: new Date().toISOString(),
+        operator: 'SYSTEM',
+        text: 'Eliminato definitivamente (soft-delete)',
+        step: null,
+        pieces: 0,
+      });
+    const patch: any = {
+        hidden: true,
+        deleted_permanently: true,
+        deleted_at: serverTimestamp(),
+        notes_log: notesLog,
+      };
       await setDoc(doc(db, 'order_items', row.id!), patch, { merge: true });
-      setOrders((prev: any[]) => prev.map((o) => o.id === row.id ? { ...o, ...patch, deleted_at: new Date() as any } : o));
-    } catch (err: any) { alert('Errore elimina per sempre: ' + err.message); }
+      setOrders((prev: any[]) =>
+        prev.map((o) => (o.id === row.id ? { ...o, ...patch, deleted_at: new Date() as any } : o))
+      );
+    } catch (err: any) {
+      alert('Errore elimina per sempre: ' + err.message);
+    }
   };
 
   /* ---- Import CSV ---- */
@@ -584,14 +735,16 @@ export default function App() {
       await ensureAnonAuth();
       const parsed = await new Promise<RowIn[]>((resolve, reject) => {
         Papa.parse<RowIn>(file, {
-          header: true, skipEmptyLines: true,
+          header: true,
+          skipEmptyLines: true,
           complete: (res: ParseResult<RowIn>) => resolve(res.data as RowIn[]),
           error: reject,
         });
       });
       if (!parsed || parsed.length === 0) throw new Error('Il file CSV sembra vuoto.');
 
-      let created = 0; let updated = 0;
+      let created = 0;
+      let updated = 0;
       for (const r of parsed) {
         const order_number = pick(r, ['numero ordine', 'n ordine', 'ordine', 'num ordine']);
         const customer = pick(r, ['cliente']);
@@ -615,7 +768,10 @@ export default function App() {
           if (qty_requested !== undefined) patch.qty_requested = parseNumberIT(qty_requested);
           if (qty_in_oven !== undefined) patch.qty_in_oven = parseNumberIT(qty_in_oven);
           if (steps !== undefined) patch.steps_count = Number(parseNumberIT(steps) || 0);
-          if (Object.keys(patch).length > 0) { await setDoc(ref, patch, { merge: true }); updated++; }
+          if (Object.keys(patch).length > 0) {
+            await setDoc(ref, patch, { merge: true });
+            updated++;
+          }
         } else {
           const row: any = {
             order_number: String(order_number),
@@ -627,14 +783,16 @@ export default function App() {
             qty_in_oven: parseNumberIT(qty_in_oven ?? null),
             qty_done: 0,
             steps_count: Number(parseNumberIT(steps ?? 0)) || 0,
-            steps_progress: {}, steps_time: {},
+            steps_progress: {},
+            steps_time: {},
             packed_qty: 0,
             status: 'da_iniziare' as const,
             created_at: serverTimestamp(),
             hidden: false,
-            notes_log: [], ops_log: [],
+            notes_log: [],
+            ops_log: [],
             total_elapsed_sec: 0,
-            batches: [],                    // ⬅️ pronto per i parziali
+            batches: [],
           };
           await setDoc(ref, row, { merge: true });
           created++;
@@ -642,7 +800,13 @@ export default function App() {
       }
 
       const itemsSnap = await getDocs(query(collection(db, 'order_items'), orderBy('created_at', 'desc')));
-      setOrders(itemsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any), batches: Array.isArray((d.data() as any).batches) ? (d.data() as any).batches : [] })) as any);
+      setOrders(
+        itemsSnap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+          batches: Array.isArray((d.data() as any).batches) ? (d.data() as any).batches : [],
+        })) as any
+      );
       alert(`Import completato. Creati: ${created}, Aggiornati: ${updated}.`);
     } catch (err: any) {
       console.error(err);
@@ -658,16 +822,25 @@ export default function App() {
       const richiesta = Number(o.qty_requested ?? 0);
       const fatta = Number(o.qty_done ?? 0);
       const rimanente = Math.max(0, richiesta - fatta);
-      const ops = Array.from(new Set(((o.ops_log ?? []) as any[]).map(x => x.operator).filter(Boolean))) as string[];
-      const noteStr = ((o.notes_log ?? []) as any[]).map((n) =>
-        `${new Date(n.ts).toLocaleString()}${n.operator ? ` (${n.operator})` : ''}: ${n.text || ''}`.trim()
-      ).join(' | ');
+      const ops = Array.from(
+        new Set(((o.ops_log ?? []) as any[]).map((x) => x.operator).filter(Boolean))
+      ) as string[];
+      const noteStr = ((o.notes_log ?? []) as any[])
+        .map((n) =>
+          `${new Date(n.ts).toLocaleString()}${n.operator ? ` (${n.operator})` : ''}: ${n.text || ''}`.trim()
+        )
+        .join(' | ');
       return {
-        Ordine: o.order_number, Cliente: o.customer || '',
-        Codice: o.product_code, Descrizione: o.description || '',
+        Ordine: o.order_number,
+        Cliente: o.customer || '',
+        Codice: o.product_code,
+        Descrizione: o.description || '',
         ML: o.ml ?? '',
-        'Q.ta richiesta': richiesta, 'Q.ta fatta': fatta, 'Q.ta rimanente': rimanente,
-        Operatori: ops.join(', '), Note: noteStr,
+        'Q.ta richiesta': richiesta,
+        'Q.ta fatta': fatta,
+        'Q.ta rimanente': rimanente,
+        Operatori: ops.join(', '),
+        Note: noteStr,
         'Tempo totale': secToHMS(Number(o.total_elapsed_sec || o.elapsed_sec || 0)),
         Stato: o.hidden ? 'CANCELLATO' : o.status,
       };
@@ -694,7 +867,7 @@ export default function App() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Riepilogo ordini');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(batchRows), 'Parziali (batches)');
-    XLSX.writeFile(wb, `deco-riepilogo-${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.writeFile(wb, `deco-riepilogo-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   /* ---- Helpers rendering ---- */
@@ -709,7 +882,8 @@ export default function App() {
           const showPieces = Math.min(Number(s.pieces || 0), richiesta);
           return (
             <div key={s.step} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-              <strong style={{ display: 'inline-block', minWidth: 24 }}>P{s.step}</strong>{': '}
+              <strong style={{ display: 'inline-block', minWidth: 24 }}>P{s.step}</strong>
+              {': '}
               <span>{showPieces} pz</span>{' · '}
               <span>{secToHMS(s.timeSec)}</span>
             </div>
@@ -733,7 +907,9 @@ export default function App() {
           batch: {
             id: '__virtual__',
             qty: Number(o.qty_done || 0),
-            status: (['in_essiccazione','in_imballaggio','pronti_consegna','eseguito'].includes(o.status) ? o.status : 'parziale') as any,
+            status: (['in_essiccazione', 'in_imballaggio', 'pronti_consegna', 'eseguito'].includes(o.status)
+              ? o.status
+              : 'parziale') as any,
             created_at: o.status_changed_at || o.created_at || new Date(),
             packed_qty: o.packed_qty || 0,
             packed_boxes: (o as any).packed_boxes ?? null,
@@ -747,14 +923,15 @@ export default function App() {
     return out;
   }, [baseFiltered]);
 
+  // colori badge (PARZIALE grigio)
   const badgeColor = (s: any) => {
     if (s === 'in_essiccazione') return '#f2c14e';
     if (s === 'in_imballaggio') return '#8b5a2b';
     if (s === 'pronti_consegna') return '#168a3d';
     if (s === 'eseguito') return '#555';
-    if (s === 'parziale') return '#1070c9';
+    if (s === 'parziale') return '#666';
     return '#666';
-    };
+  };
 
   const badgeLabel = (s: any) => {
     if (s === 'in_essiccazione') return 'ESSICCAZIONE';
@@ -763,6 +940,69 @@ export default function App() {
     if (s === 'eseguito') return 'COMPLETATO';
     if (s === 'parziale') return 'PARZIALE';
     return s;
+  };
+
+  /* ---- Nuovo ordine: salvataggio ---- */
+  const saveNewOrder = async () => {
+    try {
+      await ensureAnonAuth();
+      const order_number = newOrder.order_number.trim();
+      const product_code = newOrder.product_code.trim();
+      if (!order_number || !product_code) {
+        alert('Compila almeno Numero ordine e Codice prodotto.');
+        return;
+      }
+      const id = toDocId(order_number, product_code);
+      const ref = doc(db, 'order_items', id);
+      const existing = await getDoc(ref);
+      if (existing.exists()) {
+        alert('Esiste già un ordine con stesso Numero ordine + Codice. Modifica i dati oppure usa il CSV per aggiornare.');
+        return;
+      }
+
+      const row: any = {
+        order_number,
+        customer: newOrder.customer.trim(),
+        product_code,
+        description: newOrder.description.trim(),
+        ml: parseNumberIT(newOrder.ml === '' ? null : newOrder.ml),
+        qty_requested: parseNumberIT(newOrder.qty_requested === '' ? null : newOrder.qty_requested),
+        qty_in_oven: parseNumberIT(newOrder.qty_in_oven === '' ? null : newOrder.qty_in_oven),
+        qty_done: 0,
+        steps_count: Number(parseNumberIT(newOrder.steps_count === '' ? 0 : newOrder.steps_count)) || 0,
+        steps_progress: {},
+        steps_time: {},
+        packed_qty: 0,
+        status: 'da_iniziare' as const,
+        created_at: serverTimestamp(),
+        hidden: false,
+        notes_log: [],
+        ops_log: [],
+        total_elapsed_sec: 0,
+        batches: [],
+      };
+
+      await setDoc(ref, row, { merge: true });
+
+      setOrders((prev: any[]) => [
+        { id, ...row, created_at: new Date() as any },
+        ...prev,
+      ]);
+
+      setNewOrder({
+        order_number: '',
+        customer: '',
+        product_code: '',
+        description: '',
+        ml: '',
+        qty_requested: '',
+        qty_in_oven: '',
+        steps_count: '',
+      });
+      setNewOrderOpen(false);
+    } catch (err: any) {
+      alert('Errore salvataggio ordine: ' + err.message);
+    }
   };
 
   /* ---- Render ---- */
@@ -775,15 +1015,32 @@ export default function App() {
       <div className="top-row">
         <div className="controls">
           <div style={{ minWidth: 200, maxWidth: 320, width: '100%' }}>
-            <input type="file" accept=".csv,.txt" onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])} style={{ width: '100%' }} />
+            <input
+              type="file"
+              accept=".csv,.txt"
+              onChange={(e) => e.target.files && handleImportCSV(e.target.files[0])}
+              style={{ width: '100%' }}
+            />
           </div>
-          <button className="btn" onClick={() => setAdminOpen(true)}>ADMIN</button>
-          {/* opzionale pulsante nuovo ordine, se lo usavi */}
-          {/* <button className="btn" onClick={() => setNewOrderOpen(true)}>INSERISCI ORDINE</button> */}
+          <button className="btn" onClick={() => setAdminOpen(true)}>
+            ADMIN
+          </button>
+          <button className="btn btn-primary" onClick={() => setNewOrderOpen(true)}>
+            INSERISCI ORDINE
+          </button>
         </div>
 
         {/* CRUSCOTTO */}
-        <div style={{ marginLeft: 8, flex: 1, border: '1px solid #2b2f3a', borderRadius: 8, padding: 10, minWidth: 260 }}>
+        <div
+          style={{
+            marginLeft: 8,
+            flex: 1,
+            border: '1px solid #2b2f3a',
+            borderRadius: 8,
+            padding: 10,
+            minWidth: 260,
+          }}
+        >
           <h3 style={{ marginTop: 0, marginBottom: 6, fontSize: 16 }}>Cruscotto</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(140px,1fr))', gap: 10 }}>
             <label style={{ display: 'grid', gap: 4 }}>
@@ -794,15 +1051,19 @@ export default function App() {
               <div style={{ fontSize: 12, opacity: 0.8 }}>Cliente</div>
               <select value={filterCustomer} onChange={(e) => setFilterCustomer(e.target.value)}>
                 <option value="">— tutti —</option>
-                {customers.map((c) => (<option key={c} value={c}>{c}</option>))}
+                {customers.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
               </select>
             </label>
-            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display:'grid', gap:4, alignContent:'start' }}>
+            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display: 'grid', gap: 4, alignContent: 'start' }}>
               <div>Da iniziare: <strong>{kpi.da_iniziare}</strong></div>
               <div>In esecuzione: <strong>{kpi.in_esecuzione}</strong></div>
               <div>Completati: <strong>{kpi.eseguiti}</strong></div>
             </div>
-            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display:'grid', gap:4, alignContent:'start' }}>
+            <div style={{ borderLeft: '1px solid #2b2f3a', paddingLeft: 10, display: 'grid', gap: 4, alignContent: 'start' }}>
               <div>Pezzi oggi: <strong>{todayAgg.pezziOggi}</strong></div>
               <div>Tempo oggi: <strong>{secToHMS(todayAgg.secOggi)}</strong></div>
               <div><button className="btn" onClick={exportExcel}>SCARICO EXCEL</button></div>
@@ -996,13 +1257,7 @@ export default function App() {
               </label>
               <label>
                 <div>Nr. scatole / pallets</div>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={advanceBoxes === '' ? '' : Number(advanceBoxes)}
-                  onChange={(e) => setAdvanceBoxes(e.target.value === '' ? '' : Number(e.target.value))}
-                />
+                <input type="number" min={0} step={1} value={advanceBoxes === '' ? '' : Number(advanceBoxes)} onChange={(e) => setAdvanceBoxes(e.target.value === '' ? '' : Number(e.target.value))} />
               </label>
               <label>
                 <div>Misura</div>
@@ -1010,13 +1265,7 @@ export default function App() {
               </label>
               <label>
                 <div>Peso (kg)</div>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={advanceWeight === '' ? '' : Number(advanceWeight)}
-                  onChange={(e) => setAdvanceWeight(e.target.value === '' ? '' : Number(e.target.value))}
-                />
+                <input type="number" min={0} step="0.01" value={advanceWeight === '' ? '' : Number(advanceWeight)} onChange={(e) => setAdvanceWeight(e.target.value === '' ? '' : Number(e.target.value))} />
               </label>
               <label>
                 <div>Note</div>
@@ -1107,6 +1356,97 @@ export default function App() {
               Gli ordini “Eliminati per sempre” non compaiono più in lista ma restano nello storico Excel.
             </div>
           </div>
+        </div>
+      </Modal>
+
+      {/* NUOVO ORDINE (MANUALE) */}
+      <Modal open={newOrderOpen} onClose={() => setNewOrderOpen(false)} title="Inserisci nuovo ordine">
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8 }}>
+            <label>
+              <div>Numero ordine *</div>
+              <input
+                value={newOrder.order_number}
+                onChange={(e) => setNewOrder((p) => ({ ...p, order_number: e.target.value }))}
+                placeholder="Es. 12345"
+              />
+            </label>
+            <label>
+              <div>Cliente</div>
+              <input
+                value={newOrder.customer}
+                onChange={(e) => setNewOrder((p) => ({ ...p, customer: e.target.value }))}
+                placeholder="Cliente"
+              />
+            </label>
+          </div>
+
+          <label>
+            <div>Codice prodotto *</div>
+            <input
+              value={newOrder.product_code}
+              onChange={(e) => setNewOrder((p) => ({ ...p, product_code: e.target.value }))}
+              placeholder="Es. ABC-001"
+            />
+          </label>
+
+          <label>
+            <div>Descrizione</div>
+            <input
+              value={newOrder.description}
+              onChange={(e) => setNewOrder((p) => ({ ...p, description: e.target.value }))}
+              placeholder="Descrizione prodotto"
+            />
+          </label>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8 }}>
+            <label>
+              <div>ML</div>
+              <input
+                value={newOrder.ml}
+                onChange={(e) => setNewOrder((p) => ({ ...p, ml: e.target.value }))}
+                placeholder="Es. 1.5"
+              />
+            </label>
+            <label>
+              <div>Q.ta richiesta</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={newOrder.qty_requested}
+                onChange={(e) => setNewOrder((p) => ({ ...p, qty_requested: e.target.value }))}
+                placeholder="Es. 100"
+              />
+            </label>
+            <label>
+              <div>In forno</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={newOrder.qty_in_oven}
+                onChange={(e) => setNewOrder((p) => ({ ...p, qty_in_oven: e.target.value }))}
+                placeholder="Es. 20"
+              />
+            </label>
+            <label>
+              <div>Passaggi</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={newOrder.steps_count}
+                onChange={(e) => setNewOrder((p) => ({ ...p, steps_count: e.target.value }))}
+                placeholder="Es. 3"
+              />
+            </label>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+          <button className="btn btn-primary" onClick={saveNewOrder}>
+            Salva ordine
+          </button>
         </div>
       </Modal>
     </div>
