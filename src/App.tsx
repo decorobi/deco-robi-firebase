@@ -162,6 +162,7 @@ function useCompactStyles() {
       aside.sticky-aside{position:sticky;top:8px;height:calc(100vh - 16px);display:flex;flex-direction:column}
       @media (max-width:1200px){aside.sticky-aside{position:static;height:auto}}
 
+      /* ----- MOBILE ----- */
       @media (max-width:640px){
         .table-wrap{display:none}
         .mobile-list{display:grid;gap:8px}
@@ -381,6 +382,7 @@ export default function App() {
   const onPause = async (row: any) => {
     const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
     const now = Date.now();
+    definitelyRead(t); // keep TS calm if unused elsewhere
     const extra = t.startedAt ? Math.round((now - t.startedAt) / 1000) : 0;
     const elapsed = (t.elapsed || 0) + extra;
     setTimers((tt) => ({ ...tt, [row.id!]: { running: false, startedAt: null, elapsed } }));
@@ -404,6 +406,9 @@ export default function App() {
       prev.map((o) => (o.id === row.id ? { ...o, status: 'in_esecuzione', timer_start: Date.now() } : o))
     );
   };
+
+  // tiny no-op used to avoid TS "t unused" warning in onPause path when bundlers mangle
+  function definitelyRead(_x:any){}
 
   /* ---- Stop: aggiorna progress e crea BATCH solo all’ultimo passaggio ---- */
   const openStop = (row: any) => {
@@ -446,12 +451,10 @@ export default function App() {
     const nextStepsProg: Record<number, number> = { ...(row.steps_progress || {}) };
     nextStepsProg[pass] = (nextStepsProg[pass] ?? 0) + Number(stopPieces || 0);
 
-    // calcolo “pezzi completamente finiti” PRIMA e DOPO
     const prevFully = Number(row.qty_done || 0);
     const newFully = computeFullyDone(stepsCount, nextStepsProg, 0);
     const fullyDelta = Math.max(0, newFully - prevFully);
 
-    // log
     const notesLog = Array.isArray(row.notes_log) ? [...row.notes_log] : [];
     if (stopNotes && stopNotes.trim()) {
       notesLog.push({
@@ -471,14 +474,13 @@ export default function App() {
       duration_sec: extraFromRun,
     });
 
-    // batches: CREA SOLO SE i pezzi “completamente finiti” sono aumentati
-    // E SOLO se lo STOP è sull’ULTIMO PASSAGGIO di quell’ordine
+    // batches: crea solo quando si chiude l’ULTIMO passaggio e aumentano i pezzi completamente finiti
     const nextBatches: Batch[] = Array.isArray(row.batches) ? [...row.batches] : [];
     if (fullyDelta > 0 && stepsCount > 0 && pass === stepsCount) {
       nextBatches.push({
         id: genId(),
         qty: fullyDelta,
-        status: 'parziale',           // PARZIALE (grigio)
+        status: 'parziale',   // grigio
         created_at: new Date() as any,
       });
     }
@@ -486,7 +488,6 @@ export default function App() {
     const richiesta = Number(row.qty_requested || 0);
     const isCompletedTot = richiesta > 0 && newFully >= richiesta;
 
-    // persist
     const patch: any = {
       status: isCompletedTot ? 'eseguito' : 'da_iniziare',
       elapsed_sec: totalElapsed,
@@ -508,7 +509,6 @@ export default function App() {
 
     await setDoc(doc(db, 'order_items', row.id!), patch, { merge: true });
 
-    // UI immediata
     setOrders((prev: any[]) =>
       prev.map((o) =>
         o.id === row.id
@@ -714,7 +714,7 @@ export default function App() {
         step: null,
         pieces: 0,
       });
-    const patch: any = {
+      const patch: any = {
         hidden: true,
         deleted_permanently: true,
         deleted_at: serverTimestamp(),
@@ -900,7 +900,6 @@ export default function App() {
       if (o.hidden) return;
       const arr: Batch[] = Array.isArray(o.batches) ? o.batches : [];
       arr.forEach((b) => out.push({ order: o, batch: b }));
-      // compat “vecchio”: se non ha batches ma ha qty_done>0, mostra un “virtual batch”
       if (arr.length === 0 && Number(o.qty_done || 0) > 0) {
         out.push({
           order: o,
@@ -1076,6 +1075,7 @@ export default function App() {
       <div className="layout">
         {/* LISTA ORDINI (sinistra) */}
         <div>
+          {/* DESKTOP TABLE */}
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -1144,6 +1144,77 @@ export default function App() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* MOBILE LIST */}
+          <div className="mobile-list">
+            {visibleOrders.map((row: any) => {
+              const t = timers[row.id!] || { running: false, startedAt: null, elapsed: baseElapsedOf(row) };
+              const now = Date.now(); const _ = tick;
+              const elapsed = t.running && t.startedAt ? t.elapsed + Math.round((now - t.startedAt) / 1000) : t.elapsed;
+              const richiesta = Number(row.qty_requested ?? 0);
+              const fatta = Number(row.qty_done ?? 0);
+              const rimanente = Math.max(0, richiesta - fatta);
+              const hasNotes = Array.isArray(row.notes_log) && row.notes_log.length > 0;
+              const stats = aggregateStepStats(row);
+
+              return (
+                <div key={row.id} className="mobile-card">
+                  <div className="row">
+                    <div>
+                      <div style={{ fontWeight: 700 }}>
+                        {row.order_number} · {row.product_code}
+                      </div>
+                      <div style={{ opacity: .9, fontSize: 12 }}>{row.description || '—'}</div>
+                      <div style={{ marginTop: 6, fontSize: 12, opacity: .9 }}>
+                        Timer: <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{secToHMS(elapsed)}</strong>
+                        {row.status === 'pausato' && (
+                          <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 6, background: '#666', color: 'white' }}>
+                            Pausa
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, opacity: .85 }}>
+                      {row.customer || ''}
+                    </div>
+                  </div>
+
+                  <div className="meta" style={{ marginTop: 8 }}>
+                    <div><div style={{ opacity: .7, fontSize: 11 }}>Q.ta richiesta</div><strong>{richiesta || '—'}</strong></div>
+                    <div><div style={{ opacity: .7, fontSize: 11 }}>Q.ta fatta</div><strong>{fatta}</strong></div>
+                    <div><div style={{ opacity: .7, fontSize: 11 }}>Rimanenti</div><strong>{rimanente}</strong></div>
+                    <div><div style={{ opacity: .7, fontSize: 11 }}>Passaggi</div>
+                      {stats.length === 0 ? '—' : (
+                        <div style={{ fontSize: 11 }}>
+                          {stats.map((s) => {
+                            const showPieces = Math.min(Number(s.pieces || 0), richiesta || Infinity);
+                            return <div key={s.step}>P{s.step}: {showPieces} · {secToHMS(s.timeSec)}</div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                    <button className="btn btn-primary" disabled={row.status !== 'da_iniziare'} onClick={() => onStart(row)}>Start</button>
+                    {row.status === 'in_esecuzione' && (
+                      <button className="btn btn-warning" onClick={() => onPause(row)}>Pausa</button>
+                    )}
+                    <button className="btn btn-success" disabled={row.status !== 'pausato'} onClick={() => onResume(row)}>Riprendi</button>
+                    <button className="btn btn-danger" onClick={() => openStop(row)}>Stop</button>
+                    <button
+                      className="btn"
+                      onClick={() => { setNotesTarget(row); setNotesOpen(true); }}
+                      style={{ padding: '6px 10px', fontSize: 12, opacity: hasNotes ? 1 : 0.6, border: hasNotes ? '1px solid #888' : '1px dashed #666' }}
+                      title={hasNotes ? 'Vedi note' : 'Aggiungi/vedi note'}
+                    >
+                      Note
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
